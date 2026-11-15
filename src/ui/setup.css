@@ -190,6 +190,54 @@ html[data-theme-hue] #root .su-theme i { filter: hue-rotate(calc(-1 * var(--them
 .su-voice.su-on { border-color: #3fb6ff; background: rgba(10, 44, 84, 0.65); box-shadow: 0 0 0 1px #3fb6ff inset; }
 .su-voice.su-on .su-play { background: #3fb6ff; color: #021226; }
 .su-novoice { color: #6f8fb0; padding: 6px 2px; }
+/* The two voice groups: works online / works offline. */
+.su-vgroup { color: #8fb4d6 !important; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 4px; }
+/* Online / offline picks, and the standard list (no scrolling: it is short). */
+.su-vpicks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.su-vpick {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 182, 255, 0.3);
+  background: rgba(10, 44, 84, 0.35);
+  min-width: 0;
+}
+.su-vpick small { color: #6f8fb0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.su-vpick strong { color: #e6f3ff; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.su-voices-std { max-height: none; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+/* An offline voice: the card picks it; the small button uses it online too. */
+.su-voice-off { display: grid; grid-template-columns: 1fr; gap: 6px; cursor: default; }
+.su-vmain {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.su-vmain small { grid-column: 2; color: #6f8fb0; font-size: 11.5px; }
+.su-voice-off.su-on .su-play { background: #3fb6ff; color: #021226; }
+.su-vboth {
+  justify-self: start;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 182, 255, 0.3);
+  background: transparent;
+  color: #8fb4d6;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.su-vboth:hover { border-color: #3fb6ff; color: #cfe6fb; }
+.su-vboth.su-on { border-color: #3fb6ff; background: rgba(63, 182, 255, 0.18); color: #e6f3ff; }
 /* Speech speed slider */
 .su-rate { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .su-rate input[type='range'] { flex: 1; min-width: 160px; accent-color: #3fb6ff; height: 22px; cursor: pointer; }

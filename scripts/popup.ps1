@@ -61,10 +61,14 @@ $script:hue = $themeHues[$script:theme]
 # messages, and the main window's title, which is how this finds that window.
 function Get-Assistant {
   try { $a = ([IO.File]::ReadAllText($profileFile) | ConvertFrom-Json).assistant } catch { $a = $null }
-  if ($a -and "$a".Trim()) { "$a".Trim() } else { 'JARVIS' }
+  # The plain name ("J.A.R.V.I.S" -> "JARVIS"), as it is said.
+  $a = ("$a" -replace '\.+', '' -replace '\s+', ' ').Trim()
+  if ($a) { $a } else { 'JARVIS' }
 }
 $script:assistant = Get-Assistant
-$script:title = if ($script:assistant.ToUpper() -eq 'JARVIS') { 'J.A.R.V.I.S.' } else { $script:assistant.ToUpper() }
+# Written with a dot after every letter ("F.R.I.D.A.Y."): the same rule as
+# dottedName() in bridge/profile.mjs, so this matches the main window's title.
+$script:title = ($script:assistant.ToUpper() -split ' ' | ForEach-Object { (($_.ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) }) -join '.') + '.' }) -join ' '
 function Turn-Colour([string]$hex) {
   if ($script:hue -eq 0 -or $hex -ieq '#E0465A') { return $hex }
   $h = $hex.TrimStart('#')

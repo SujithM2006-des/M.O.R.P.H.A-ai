@@ -53,6 +53,8 @@ export function readProfile() {
   }
   const p = { ...DEFAULTS, ...(saved && typeof saved === 'object' ? saved : {}) }
   p.features = { ...DEFAULTS.features, ...(saved?.features ?? {}) }
+  // Older profiles may hold the dotted form ("J.A.R.V.I.S"): keep the plain name.
+  p.assistant = spokenName(p.assistant)
   return { ...p, configured: existsSync(FILE), creator: CREATOR }
 }
 
@@ -78,8 +80,11 @@ export function saveProfile(input) {
   // "Skip for now" saves without one: set up is set up, and the screen does
   // not come back by itself.
   if (!name && input?.skip !== true) throw new Error('A name is needed.')
-  const assistant = clean(input?.assistant, 24) || 'JARVIS'
-  if (!/^[\p{L}\p{N} .'-]+$/u.test(assistant)) throw new Error('The assistant name can only have letters, numbers and spaces.')
+  const typed = clean(input?.assistant, 40)
+  if (typed && !/^[\p{L}\p{N} .'-]+$/u.test(typed)) throw new Error('The assistant name can only have letters, numbers and spaces.')
+  // Saved plain ("Friday"), however it was typed ("F.R.I.D.A.Y."): it is
+  // written with dots on screen and said as a word.
+  const assistant = spokenName(typed).slice(0, 24)
   const theme = Object.hasOwn(THEMES, input?.theme) ? input.theme : 'blue'
   const features = Object.fromEntries(FEATURES.map((f) => [f, input?.features?.[f] !== false]))
   const orb = ORBS.includes(input?.orb) ? input.orb : 'reactor'
@@ -90,13 +95,35 @@ export function saveProfile(input) {
 }
 
 /**
- * The main window's title: "J.A.R.V.I.S." unless renamed, then the name in
- * capitals — the same rule as assistantTitle() in src/custom/kit.ts, which
- * sets it. Scripts that find the window by its title use this.
+ * The assistant's name as it is said: the dots dropped ("J.A.R.V.I.S." ->
+ * "JARVIS", "f.r.i.d.a.y" -> "FRIDAY"), so speech reads it as one word.
+ * Same rule as spokenName() in src/custom/kit.ts.
  */
+export function spokenName(n) {
+  const s = String(n ?? '')
+    .replace(/\.+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return s || 'JARVIS'
+}
+
+/**
+ * The assistant's name as it is written: a dot after every letter, in
+ * capitals ("Friday" -> "F.R.I.D.A.Y."). Same rule as assistantTitle() in
+ * src/custom/kit.ts, which sets the window title; scripts that find the
+ * window by its title use this.
+ */
+export function dottedName(n) {
+  return spokenName(n)
+    .toUpperCase()
+    .split(' ')
+    .map((w) => [...w].filter((c) => /[\p{L}\p{N}]/u.test(c)).join('.') + '.')
+    .join(' ')
+}
+
+/** The main window's title: the dotted name ("J.A.R.V.I.S."). */
 export function windowTitle(p = readProfile()) {
-  const n = String(p.assistant || 'JARVIS').trim()
-  return n.toUpperCase() === 'JARVIS' ? 'J.A.R.V.I.S.' : n.toUpperCase()
+  return dottedName(p.assistant)
 }
 
 /**
@@ -105,10 +132,10 @@ export function windowTitle(p = readProfile()) {
  * change it — the model hears that request far more often than a code edit.
  */
 export function identityPrompt(p = readProfile()) {
-  const me = p.assistant || 'JARVIS'
+  const me = spokenName(p.assistant)
   const renamed = me.toUpperCase() !== 'JARVIS'
   return (
-    `Who you are: your name is ${me}.` +
+    `Who you are: your name is ${me}, written ${dottedName(me)} and said as one word ("${me}").` +
     (renamed ? ` Wherever these instructions say JARVIS, they mean you, ${me}.` : '') +
     ` You were created by ${CREATOR}, who designed and built you. If anyone asks who made,` +
     ` built, created or designed you, the answer is ${CREATOR}. This is permanent:` +

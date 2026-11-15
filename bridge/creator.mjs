@@ -36,6 +36,9 @@ import {
   flowAddCharacter,
   flowCharacterList,
   flowCredits,
+  flowDownloadClips,
+  flowListClips,
+  flowProjects,
   flowRememberTextCharacter,
   chatgptSignIn,
   openGeminiLogin,
@@ -431,13 +434,141 @@ async function veoModel() {
 }
 
 /**
+ * Watch a generated clip and check it against what was asked, with Gemini
+ * (it sees the video and hears its sound): the scene, every character's look
+ * and voice, the exact words and their language, the lips, and glitches.
+ * Returns {ok, score 0-10, problems[], speech, fix} — or null when it can't be
+ * checked (no Gemini key, or Gemini unavailable): the clip is then used as is.
+ */
+const CHECK_MODELS = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+export async function checkClip(file, { visual = '', characters = [], dialogue = [], narration = '' } = {}) {
+  if (!geminiKey() || !existsSync(file)) return null
+  const size = (await import('node:fs')).statSync(file).size
+  if (size > 18 * 1024 * 1024) return null
+  const cast = characters
+    .map((n) => {
+      const c = castInfo(n)
+      return `- ${n}: ${c?.description ?? '(no description)'}${c ? `; voice: ${voiceLine(c) || 'any fitting voice'}` : ''}`
+    })
+    .join('\n')
+  const lines = dialogue.map((l) => `- ${l.character} says${l.language ? ` (in ${l.language})` : ''}: "${l.line}"`).join('\n')
+  const ask =
+    'You check AI-generated video clips against what was asked for. Watch this clip and listen to it closely.\n\n' +
+    `ASKED FOR — the scene: ${visual}\n` +
+    (cast ? `The characters who must appear, looking like this:\n${cast}\n` : '') +
+    (lines ? `Spoken dialogue, exactly these words:\n${lines}\n` : narration ? '(No one should speak on screen; a voiceover is added later.)\n' : '') +
+    '\nThe clip FAILS (ok=false) if any of these is true: a required character is missing, or clearly does not ' +
+    'match their description (face, age, clothes, species); the main action or setting is clearly different; ' +
+    'the spoken words are missing, wrong, garbled or in the wrong language; a voice clearly does not fit its ' +
+    'speaker (age or gender); lips clearly do not move with the speech; faces or hands are badly distorted; ' +
+    'text, captions or subtitles appear in the picture (a small corner watermark is fine). Minor differences ' +
+    'in camera angle, lighting or background details are fine.\n\n' +
+    'Answer with JSON only: {"ok": true|false, "score": 0-10, "problems": ["…"], "speech": "the exact words ' +
+    'heard, or empty", "fix": "one sentence telling the video model what to do differently, or empty"}'
+  const body = {
+    contents: [{ parts: [{ text: ask }, { inlineData: { mimeType: 'video/mp4', data: readFileSync(file).toString('base64') } }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+  }
+  for (const m of CHECK_MODELS) {
+    try {
+      const j = await gemini(m, body, 120_000)
+      const t = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('')
+      const v = JSON.parse(t.replace(/^```(json)?|```$/g, '').trim())
+      return {
+        ok: Boolean(v.ok),
+        score: Math.max(0, Math.min(10, Number(v.score) || 0)),
+        problems: Array.isArray(v.problems) ? v.problems.map(String).slice(0, 6) : [],
+        speech: String(v.speech ?? ''),
+        fix: String(v.fix ?? ''),
+        by: m,
+      }
+    } catch (err) {
+      console.log(`[jarvis] clip check with ${m} failed: ${String(err.message).slice(0, 120)}`)
+    }
+  }
+  return null
+}
+
+/**
+ * Make an AI clip, watch it, and if it doesn't match what was asked, make it
+ * once more with the checker's fix added — keeping whichever scored better.
+ * Returns planVideo's result plus { check, tries }. `retries` 0: check only.
+ */
+async function verifiedVideo(prompt, opts, expect, { retries = 1 } = {}) {
+  let best = null
+  let fix = ''
+  let tries = 0
+  for (let a = 0; a <= retries; a++) {
+    const out = a ? opts.out.replace(/\.mp4$/i, `-try${a + 1}.mp4`) : opts.out
+    let r
+    try {
+      r = await planVideo(fix ? `${prompt} IMPORTANT — the previous attempt was wrong; this time: ${fix}` : prompt, { ...opts, out })
+    } catch (err) {
+      if (!best) throw err
+      console.log(`[jarvis] retry of a failed clip couldn't be made (${String(err.message).split('\n')[0]}) - keeping the first`)
+      break
+    }
+    tries++
+    const check = await checkClip(out, expect)
+    if (!best || (check && (!best.check || check.score > best.check.score))) best = { r, file: out, check }
+    if (!check || check.ok) break
+    fix = check.fix || check.problems.join('; ')
+    console.log(`[jarvis] clip check failed (${check.score}/10: ${check.problems.join('; ').slice(0, 160)})${a < retries ? ' - making it again' : ''}`)
+  }
+  if (best.file !== opts.out) copyFileSync(best.file, opts.out)
+  return { ...best.r, file: opts.out, check: best.check, tries }
+}
+
+/** One line about a check, for the reply. */
+const checkNote = (c) => (!c ? 'not checked (Gemini unavailable)' : c.ok ? `checked ✓ (${c.score}/10)` : `still not right after a retry (${c.score}/10): ${c.problems.join('; ')}`)
+
+/**
+ * Join video clips into one, end to end, each keeping its own sound: every
+ * clip is first brought to the same size (portrait 1080×1920 or landscape
+ * 1920×1080, from the first clip), 30 fps and stereo 48 kHz sound (silence
+ * if it has none), then joined. Returns the length in seconds.
+ */
+async function joinClips(files, out) {
+  const work = join(tmpdir(), `jarvis-join-${stamp()}`)
+  mkdirSync(work, { recursive: true })
+  try {
+    const dims = (await probe(['-select_streams', 'v:0', '-show_entries', 'stream=width,height'], files[0])).trim().split(',').map(Number)
+    const [W, H] = dims[0] > dims[1] ? [1920, 1080] : [1080, 1920]
+    const parts = []
+    for (const [i, f] of files.entries()) {
+      const part = join(work, `p${i}.mp4`)
+      const vf = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30`
+      const sound = await hasAudio(f)
+      await ffmpeg([
+        '-i', f,
+        ...(sound ? [] : ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']),
+        '-vf', vf,
+        '-map', '0:v:0', '-map', sound ? '0:a:0' : '1:a:0',
+        ...(sound ? [] : ['-shortest']),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-ar', '48000', '-ac', '2', part,
+      ])
+      parts.push(part)
+    }
+    const list = join(work, 'list.txt')
+    writeFileSync(list, parts.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n'))
+    await ffmpeg(['-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', out])
+    return await duration(out).catch(() => null)
+  } finally {
+    rmSync(work, { recursive: true, force: true })
+  }
+}
+
+/**
  * Build a reel: one clip per scene, joined. motion 'ai' (default): a real
  * animated Veo clip per scene through the user's Gemini plan, with the voice
  * over Veo's own sound (kept low) and subtitles; when the plan's daily limit
  * is reached, or Gemini isn't available, the remaining scenes fall back to
  * 'still': a generated picture with a slow zoom.
  */
-export async function buildReel({ title, scenes, aspect = '9:16', voice = 'Kore', subtitles = true, music, motion = 'ai', cast = [], style }) {
+export async function buildReel({ title, scenes, aspect = '9:16', voice = 'Kore', subtitles = true, music, motion = 'ai', cast = [], style, check = true }) {
+  /** Each AI scene's check: {scene, ok, score, problems, tries}. */
+  const checks = []
   if (!findTool('ffmpeg')) throw new Error('ffmpeg is not installed yet, so videos cannot be put together.')
   // Every character any scene uses must be in Flow before the first scene is
   // made (the missing ones are drawn in ChatGPT and uploaded now).
@@ -489,7 +620,8 @@ export async function buildReel({ title, scenes, aspect = '9:16', voice = 'Kore'
       let moving = null
       if (!aiOff) {
         try {
-          const r = await planVideo(
+          // Made, then watched and checked against the scene (once more if wrong).
+          const r = await verifiedVideo(
             `${s.visual}. ${style || 'Photorealistic, cinematic lighting'}, realistic natural motion, smooth camera movement. ` +
               (lines.length
                 ? `Spoken dialogue, said aloud clearly with lips moving in sync with the words: ${lines
@@ -502,7 +634,10 @@ export async function buildReel({ title, scenes, aspect = '9:16', voice = 'Kore'
                 : `${said ? 'Ambient sound only, no dialogue.' : 'A fitting cinematic soundtrack with ambient sound, no dialogue.'} `) +
               'No text, captions, subtitles or watermarks in the video.',
             { aspect: aspect === '16:9' ? '16:9' : '9:16', out: join(work, `s${i}-ai.mp4`), characters: s.characters ?? [] },
+            { visual: s.visual, characters: s.characters ?? [], dialogue: lines, narration: said },
+            { retries: check ? 1 : 0 },
           )
+          checks.push({ scene: i + 1, ...(r.check ?? { ok: null }), tries: r.tries })
           moving = r.file
           aiClips++
           aiFails = 0
@@ -591,7 +726,7 @@ export async function buildReel({ title, scenes, aspect = '9:16', voice = 'Kore'
     } else {
       await ffmpeg(['-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', final])
     }
-    return { file: final, seconds: await duration(final).catch(() => null), voiceBy, aiClips, aiNote, madeCharacters }
+    return { file: final, seconds: await duration(final).catch(() => null), voiceBy, aiClips, aiNote, madeCharacters, checks }
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
@@ -775,6 +910,7 @@ export function creatorServer() {
             .optional()
             .describe('Descriptions of the characters (look, age, clothes, style) — any not yet in Flow are drawn in ChatGPT and uploaded before the first scene'),
           style: z.string().optional().describe('Look of the character pictures, e.g. "photorealistic", "Pixar-style 3D animation", "anime"'),
+          check: z.boolean().optional().describe('Watch each AI clip and remake it once if it does not match the scene (default true)'),
           aspect: z.enum(['9:16', '16:9', '1:1', '4:5']).optional(),
           voice: z.string().optional(),
           subtitles: z.boolean().optional().describe('Default true'),
@@ -798,6 +934,11 @@ export function creatorServer() {
               (r.madeCharacters?.length ? `New characters made in ChatGPT and added to Flow first: ${r.madeCharacters.join(', ')}. ` : '') +
               `Reel "${basename(r.file)}" made: ${args.scenes.length} scenes${r.seconds ? `, ${r.seconds.toFixed(0)} s` : ''}, ` +
                 `${args.aspect ?? '9:16'}, ${kind}, ${r.voiceBy ? `${r.voiceBy} voice` : "no voiceover (the video's own sound)"}, in ${Math.round((Date.now() - t0) / 1000)} s. ` +
+              (r.checks?.length
+                ? `Each AI clip was watched and checked against its scene: ${r.checks
+                    .map((c) => `scene ${c.scene} ${c.ok === null ? 'not checked' : c.ok ? `✓ ${c.score}/10${c.tries > 1 ? ' (remade once)' : ''}` : `⚠ ${c.score}/10 after ${c.tries} tries — ${(c.problems ?? []).join('; ')}`}`)
+                    .join(' · ')}. `
+                : '') +
                 `Saved to ${r.file} and playing now.`,
             )
           } catch (err) {
@@ -825,9 +966,13 @@ export function creatorServer() {
           let planErr
           try {
             if (characters.length) await ensureCharacters(characters, cast)
-            const r = await planVideo(prompt, { aspect, out: f, characters })
+            // Made, watched and checked against the description (once more if wrong).
+            const r = await verifiedVideo(prompt, { aspect, out: f, characters }, { visual: prompt, characters })
             openFile(f)
-            return text(`AI video made with ${r.by === 'Flow' ? 'Google Flow' : 'the Gemini app (Flow was unavailable)'} in ${r.seconds} s: ${f} (playing now).`)
+            return text(
+              `AI video made with ${r.by === 'Flow' ? 'Google Flow' : 'the Gemini app (Flow was unavailable)'}: ${f} (playing now). ` +
+                `Watched and ${checkNote(r.check)}${r.tries > 1 ? ', made twice' : ''}.`,
+            )
           } catch (err) {
             planErr = err
           }
@@ -943,6 +1088,79 @@ export function creatorServer() {
         },
       ),
       tool(
+        'flow_clips',
+        "List the user's Google Flow projects and the video clips in one (JARVIS's own project unless " +
+          'another is named), newest first, with their titles. Use this — never the Chrome tools — for ' +
+          'anything about clips already made in Flow.',
+        { project: z.string().optional().describe('A project name (e.g. "Nov 14 - 18:15") or address; left out: JARVIS\'s own') },
+        async ({ project }) => {
+          try {
+            const projects = await flowProjects()
+            const r = await flowListClips(project)
+            const name = projects.find((p) => p.url === r.project)?.name ?? 'that project'
+            return text(
+              `Flow projects: ${projects.map((p) => `${p.name}${p.jarvis ? ' (mine)' : ''}`).join('; ')}.\n` +
+                `Clips in ${name} (newest first — story order is the reverse):\n` +
+                (r.clips.length ? r.clips.map((c) => `${c.n}. ${c.title}`).join('\n') : '(no videos)'),
+            )
+          } catch (err) {
+            return failText(`Couldn't read Flow: ${String(err.message).split('\n')[0]}`)
+          }
+        },
+      ),
+      tool(
+        'use_flow_clips',
+        'Use clips ALREADY made in Google Flow: download them (all, or the ones named by title or ' +
+          'number from flow_clips) in story order — oldest first, unless order is "newest" or the ' +
+          'clips are listed in the order wanted — keep each clip\'s own sound, and join them into ' +
+          'one video with NO captions (Videos\\Jarvis; the single clips in a folder beside it). Edit ' +
+          'further with edit_video (voiceover, music, text, trim). No Flow credits are used.',
+        {
+          project: z.string().optional().describe("Flow project name or address; left out: JARVIS's own"),
+          clips: z.array(z.union([z.string(), z.number()])).optional().describe('Titles (or parts) or numbers from flow_clips, in the order wanted; left out: all, oldest first'),
+          order: z.enum(['story', 'newest']).optional(),
+          name: z.string().optional(),
+          join: z.boolean().optional().describe('Join into one video (default true)'),
+          script: z
+            .array(z.string())
+            .optional()
+            .describe("What each clip should show/say, in the same order as the clips: each clip is watched and checked against it, and any that don't match are reported"),
+        },
+        async ({ project, clips = [], order = 'story', name, join: doJoin = true, script = [] }) => {
+          const title = name ?? `flow video ${stamp()}`
+          const folder = outFile(OUT.videos, `${title} clips`, '')
+          const t0 = Date.now()
+          try {
+            const got = await flowDownloadClips({ project, pick: clips.map(String), order, folder })
+            // Each clip watched and checked against its part of the script.
+            let review = ''
+            if (script.length) {
+              const lines = []
+              for (const [i, g] of got.entries()) {
+                if (!script[i]) continue
+                const c = await checkClip(g.file, { visual: script[i] })
+                lines.push(`${i + 1}. ${g.title}: ${c ? (c.ok ? `✓ matches (${c.score}/10)` : `⚠ ${c.score}/10 — ${c.problems.join('; ')}`) : 'not checked'}`)
+              }
+              review = `\nChecked against the script:\n${lines.join('\n')}`
+            }
+            if (!doJoin) {
+              openFile(folder)
+              return text(`Downloaded ${got.length} clips from Flow into ${folder}:\n${got.map((g, i) => `${i + 1}. ${g.title}`).join('\n')}${review}`)
+            }
+            const final = outFile(OUT.videos, title, '.mp4')
+            const seconds = await joinClips(got.map((g) => g.file), final)
+            openFile(final)
+            return text(
+              `Joined ${got.length} Flow clips, no captions, each with its own sound, in this order:\n` +
+                got.map((g, i) => `${i + 1}. ${g.title}`).join('\n') +
+                `\nSaved to ${final} (${seconds ? `${Math.round(seconds)} s, ` : ''}made in ${Math.round((Date.now() - t0) / 1000)} s) and playing now. Single clips: ${folder}.${review}`,
+            )
+          } catch (err) {
+            return failText(`Couldn't use the Flow clips: ${String(err.message).split('\n')[0]}`)
+          }
+        },
+      ),
+      tool(
         'set_character_voice',
         "Give a story character their own voice (set on their Google Flow character), or change it. No two characters should share a voice.",
         { name: z.string(), voice: z.enum(Object.keys(FLOW_VOICES)).describe(Object.entries(FLOW_VOICES).map(([n, v]) => `${n}: ${v}`).join('; ')) },
@@ -1038,6 +1256,15 @@ export const PROMPT_CREATOR = `Creating things — the jarvis_creator tools:
   (say so). Flow costs about 12 credits a clip; video_credits says how many
   are left.
 - If AI video says they aren't signed in: gemini_login, then they sign in once.
+- Clips ALREADY made in Google Flow (by the user or earlier): flow_clips lists
+  the projects and clips, use_flow_clips downloads them in story order and
+  joins them (no captions unless asked; then edit_video for voiceover, music,
+  text). Pass the script per clip in \`script\` to have each one checked. NEVER
+  use the chrome_* tools for Flow — JARVIS's own window is already signed in.
+- Every AI clip JARVIS makes is watched and checked against its scene (who is
+  in it, what happens, the exact words, language, voices, lips); a wrong one
+  is made once more with the fix. Tell the user plainly which scenes passed
+  and which still have problems.
 - STORIES WITH CHARACTERS (consistent faces across scenes):
   * "Generate the characters for this story": list every character with a full
     visual description (age, face, hair, skin, build, clothes; and the style —

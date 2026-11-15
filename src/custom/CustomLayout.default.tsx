@@ -1524,7 +1524,7 @@ export default function CustomLayout() {
             <span className="vg-tip">{a.label}</span>
           </button>
         ))}
-        <Me name={NAME} assistant={profile?.assistant || 'JARVIS'} />
+        <Me name={NAME} assistant={assistantTitle(profile)} />
       </nav>
 
       {/* Left column */}
@@ -1595,7 +1595,7 @@ export default function CustomLayout() {
           onExpand={closeChat}
         />
         {chat ? (
-          <ChatView title={activeTitle} assistant={profile?.assistant || 'Jarvis'} onClose={closeChat} />
+          <ChatView title={activeTitle} assistant={assistantTitle(profile)} onClose={closeChat} />
         ) : (
           <>
             <AgentTrace steps={trace} />

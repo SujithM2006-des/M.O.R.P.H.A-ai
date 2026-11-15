@@ -29,6 +29,10 @@ import { spawn as spawnProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { FEATURES, identityPrompt, readProfile, saveProfile } from './profile.mjs'
+import { naturalSay, naturalVoices, warmNaturalVoices } from './voices.mjs'
+
+// Ready before the first sentence: the helper starts and the list is fetched.
+warmNaturalVoices()
 import { OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, useLocal } from './brain.mjs'
 import { PROXY_URL, proxyIsUp, proxyKey, startProxy } from './litellm.mjs'
 import { newsPrompt, newsServer, startNews } from './news.mjs'
@@ -1725,6 +1729,31 @@ const handleRequest = async (req, res) => {
            String(err?.message ?? 'unknown error').replace(/[<&]/g, '')
          }`,
       )
+    }
+  }
+
+  // Natural voices (bridge/voices.mjs): the list for the setup screen, and a
+  // sentence spoken in one of them, as MP3.
+  if (req.method === 'GET' && req.url === '/voices') {
+    try {
+      const voices = await naturalVoices()
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ natural: voices }))
+    } catch (err) {
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ natural: [], error: String(err?.message ?? err) }))
+    }
+  }
+  if (req.method === 'POST' && req.url === '/voice/say') {
+    try {
+      const { text, voice, rate } = await readJson(req)
+      if (!text || !voice) throw new Error('text and voice are needed')
+      const mp3 = await naturalSay(text, voice, rate)
+      res.writeHead(200, { ...cors, 'content-type': 'audio/mpeg' })
+      return res.end(mp3)
+    } catch (err) {
+      res.writeHead(502, cors)
+      return res.end(String(err?.message ?? err))
     }
   }
 

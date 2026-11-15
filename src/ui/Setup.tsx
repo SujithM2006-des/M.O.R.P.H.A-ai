@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react'
 import { BRIDGE_HTTP_URL } from '../config'
-import { currentRate, currentVoiceName, listVoices, previewVoice, setVoiceProfile } from '../lib/tts'
-import { assistantTitle, refreshProfile, useProfile, type Profile } from '../custom/kit'
+import {
+  currentOfflineVoice,
+  currentRate,
+  currentVoiceName,
+  isNatural,
+  NATURAL,
+  previewVoice,
+  setVoiceProfile,
+  STANDARD_VOICES,
+} from '../lib/tts'
+import { assistantTitle, dottedName, refreshProfile, spokenName, useProfile, type Profile } from '../custom/kit'
+
+/** "JARVIS" -> "Jarvis", for showing how the name is said. */
+const nameWord = (s: string) => s.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_m, a, b) => a + b.toUpperCase())
 import { ORBS, Orb } from '../custom/orbs'
 import './setup.css'
 
@@ -97,6 +109,8 @@ export function Setup() {
   const [leaving, setLeaving] = useState('')
   const [keyInput, setKeyInput] = useState<Record<string, string | null>>({})
   const [voices, setVoices] = useState<{ name: string; lang: string }[]>([])
+  /** The voice picked for offline here ('' = unchanged). */
+  const [offVoice, setOffVoice] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState('')
 
@@ -119,8 +133,9 @@ export function Setup() {
   // Fresh copy of the profile each time the screen opens.
   useEffect(() => {
     if (open && profile) {
-      setForm({ ...profile, features: { ...profile.features } })
+      setForm({ ...profile, assistant: dottedName(profile.assistant), features: { ...profile.features } })
       setVoice('')
+      setOffVoice('')
       setRate(Math.round(currentRate() * 20) / 20)
       setKeyInput({})
       // The keys first (quick), then ChatGPT's sign-in too (a few seconds).
@@ -137,10 +152,11 @@ export function Setup() {
     }
   }, [open, profile])
 
-  // The system voices arrive asynchronously in Chrome.
+  // The voices installed on the PC (the offline ones) arrive asynchronously in Chrome.
   useEffect(() => {
     if (!open) return
-    const load = () => setVoices(listVoices())
+    const load = () =>
+      setVoices(speechSynthesis.getVoices().filter((v) => v.localService).map((v) => ({ name: v.name, lang: v.lang })))
     load()
     speechSynthesis.addEventListener('voiceschanged', load)
     return () => speechSynthesis.removeEventListener('voiceschanged', load)
@@ -200,8 +216,33 @@ export function Setup() {
   const set = (patch: Partial<Profile>) => setForm({ ...form, ...patch })
 
   // The same sentence for every voice, so they can be compared fairly.
-  const sample = `Hello! I'm ${form.assistant.trim() || 'JARVIS'}, your personal assistant. How can I help you today?`
-  const current = currentVoiceName()
+  // Said as a word ("Jarvis"), never letter by letter.
+  const sample = `Hello! I'm ${nameWord(spokenName(form.assistant))}, your personal assistant. How can I help you today?`
+  // Each language's voices say it in that language, so they can be judged
+  // as they will sound.
+  const me = nameWord(spokenName(form.assistant))
+  const SAMPLES: Record<string, string> = {
+    Tamil: `வணக்கம்! நான் ${me}, உங்கள் தனிப்பட்ட உதவியாளர். இன்று நான் உங்களுக்கு எப்படி உதவலாம்?`,
+    Hindi: `नमस्ते! मैं ${me} हूँ, आपका निजी सहायक। आज मैं आपकी कैसे मदद कर सकता हूँ?`,
+    Malayalam: `നമസ്കാരം! ഞാൻ ${me}, നിങ്ങളുടെ സ്വകാര്യ സഹായി. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെ സഹായിക്കട്ടെ?`,
+    Telugu: `నమస్కారం! నేను ${me}, మీ వ్యక్తిగత సహాయకుడిని. ఈ రోజు నేను మీకు ఎలా సహాయం చేయగలను?`,
+  }
+  const sampleFor = (language: string) => SAMPLES[language] ?? sample
+  const sampleOf = (name: string) =>
+    sampleFor(STANDARD_VOICES.find((v) => NATURAL + v.id === name)?.language ?? 'English')
+
+  // The two picks: online (any voice) and offline (a voice on the PC). The PC
+  // voice that would be used offline if none was picked is shown as chosen.
+  const online = voice || currentVoiceName()
+  const offline =
+    offVoice || currentOfflineVoice() || (voices.find((v) => /david|mark|george|ravi/i.test(v.name)) ?? voices[0])?.name || ''
+  const short = (name: string) =>
+    isNatural(name)
+      ? (() => {
+          const s = STANDARD_VOICES.find((v) => NATURAL + v.id === name)
+          return s ? `${s.name} (${s.language})` : name.slice(NATURAL.length).replace(/Neural$/, '')
+        })()
+      : name.replace(/^(Microsoft|Google)\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s+Desktop$/, '')
 
   // Skip: keep the defaults. It still counts as set up, so this screen does
   // not come back by itself; the sidebar's Profile button reopens it.
@@ -221,7 +262,7 @@ export function Setup() {
         setSaving('')
         return setError(String(body.error ?? 'Could not save.'))
       }
-      if (!skip) setVoiceProfile({ voice: voice || null, rate })
+      if (!skip) setVoiceProfile({ voice: voice || null, offlineVoice: offVoice || undefined, rate })
       // Keys typed here (or removed): saved on this PC only.
       const typed = Object.fromEntries(Object.entries(keyInput).filter(([, v]) => v === null || (v ?? '').trim()))
       if (!skip && Object.keys(typed).length) {
@@ -252,7 +293,7 @@ export function Setup() {
         <header className="su-head">
           <div className="su-ring" aria-hidden="true"><i /></div>
           <div>
-            <h2 id="su-title">{firstRun ? 'Welcome — let’s set you up' : `Customize ${profile?.assistant || 'JARVIS'}`}</h2>
+            <h2 id="su-title">{firstRun ? 'Welcome — let’s set you up' : `Customize ${dottedName(profile?.assistant)}`}</h2>
             <p>{firstRun ? 'A few details so your assistant knows who it works for.' : 'Change any of this whenever you like.'}</p>
           </div>
         </header>
@@ -272,38 +313,107 @@ export function Setup() {
           <div className="su-row2">
             <label className="su-field">
               <span>Assistant’s name</span>
-              <input value={form.assistant} maxLength={24} placeholder="JARVIS" onChange={(e) => set({ assistant: e.target.value })} />
-              <small>The wake phrase stays “Hey Jarvis”.</small>
+              {/* Written with a dot after every letter (tidied when you leave the
+                  box); said as one word. */}
+              <input
+                value={form.assistant}
+                maxLength={40}
+                placeholder="J.A.R.V.I.S."
+                onChange={(e) => set({ assistant: e.target.value })}
+                onBlur={() => set({ assistant: dottedName(form.assistant) })}
+              />
+              <small>
+                Shown as {dottedName(form.assistant)} · said “{nameWord(spokenName(form.assistant))}” · the wake phrase stays “Hey Jarvis”.
+              </small>
             </label>
           </div>
 
           <div className="su-field">
-            <span>Voice — click one to hear it</span>
-            <div className="su-voices" role="listbox" aria-label="Voices">
-              {voices.length === 0 && <small className="su-novoice">Loading the voices on this PC…</small>}
-              {voices.map((v) => {
-                const chosen = (voice || current) === v.name
+            <span>Voice — click one to hear it and choose it</span>
+            {/* The two picks at a glance. */}
+            <div className="su-vpicks">
+              <div className="su-vpick">
+                <small>When online</small>
+                <strong>{short(online)}</strong>
+              </div>
+              <div className="su-vpick">
+                <small>When offline</small>
+                <strong>{offline ? short(offline) : '—'}</strong>
+              </div>
+            </div>
+
+            <small className="su-vgroup">Works online · natural voices, two per language</small>
+            <div className="su-voices su-voices-std" role="listbox" aria-label="Online voices">
+              {STANDARD_VOICES.map((v) => {
+                const key = NATURAL + v.id
+                const chosen = online === key
                 return (
                   <button
-                    key={v.name}
+                    key={v.id}
                     type="button"
                     role="option"
                     aria-selected={chosen}
-                    title={v.name}
+                    title={`${v.name} — ${v.language}, ${v.gender.toLowerCase()} (${v.id})`}
                     className={`su-voice ${chosen ? 'su-on' : ''}`}
                     onClick={() => {
-                      setVoice(v.name)
-                      previewVoice(v.name, sample, rate)
+                      setVoice(key)
+                      previewVoice(key, sampleFor(v.language), rate)
                     }}
                   >
                     <span className="su-play" aria-hidden="true">▶</span>
-                    <span className="su-vname">{v.name.replace(/^(Microsoft|Google)\s+/, '')}</span>
-                    <small>{v.lang}</small>
+                    <span className="su-vname">{v.name}</span>
+                    <small>
+                      {v.language} · {v.gender}
+                    </small>
                   </button>
                 )
               })}
             </div>
-            <small>Each plays: “{sample}”</small>
+
+            <small className="su-vgroup">Works offline · voices on this PC</small>
+            <div className="su-voices" role="listbox" aria-label="Offline voices">
+              {voices.length === 0 && <small className="su-novoice">Loading the voices on this PC…</small>}
+              {voices.map((v) => {
+                const chosen = offline === v.name
+                const alsoOnline = online === v.name
+                return (
+                  <div key={v.name} className={`su-voice su-voice-off ${chosen ? 'su-on' : ''}`}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={chosen}
+                      title={v.name}
+                      className="su-vmain"
+                      onClick={() => {
+                        setOffVoice(v.name)
+                        previewVoice(v.name, sample, rate)
+                      }}
+                    >
+                      <span className="su-play" aria-hidden="true">▶</span>
+                      <span className="su-vname">{short(v.name)}</span>
+                      <small>{v.lang}</small>
+                    </button>
+                    {/* The same voice online too, if that is what you want. */}
+                    <button
+                      type="button"
+                      className={`su-vboth ${alsoOnline ? 'su-on' : ''}`}
+                      aria-pressed={alsoOnline}
+                      title={alsoOnline ? 'Used online as well' : 'Use this voice online as well'}
+                      onClick={() => {
+                        setOffVoice(v.name)
+                        setVoice(v.name)
+                        previewVoice(v.name, sample, rate)
+                      }}
+                    >
+                      {alsoOnline ? '✓ Online too' : 'Use online too'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+            <small>
+              Each says: “{sample}” — in its own language. With no internet (or if the online voice fails), the offline voice speaks.
+            </small>
           </div>
 
           <div className="su-field">
@@ -319,8 +429,8 @@ export function Setup() {
                 aria-label="Speech speed"
                 onChange={(e) => setRate(Number(e.target.value))}
                 // Let go (mouse, touch or keys) and hear the new speed.
-                onPointerUp={() => previewVoice(voice || current, sample, rate)}
-                onKeyUp={() => previewVoice(voice || current, sample, rate)}
+                onPointerUp={() => previewVoice(online, sampleOf(online), rate)}
+                onKeyUp={() => previewVoice(online, sampleOf(online), rate)}
               />
               <small>Faster</small>
               <button type="button" className="su-ghost su-reset" onClick={() => setRate(1)}>

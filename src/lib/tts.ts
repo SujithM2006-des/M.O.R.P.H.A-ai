@@ -62,7 +62,7 @@ const ECHO_TAIL_MS = 3500
  * indistinguishable. This tells them apart at a glance.
  */
 export const diag = {
-  engine: 'system' as 'system' | 'kokoro' | 'elevenlabs',
+  engine: 'system' as 'system' | 'kokoro' | 'elevenlabs' | 'natural',
   /** Utterances handed to an engine — the OS voice or an audio element. */
   spoken: 0,
   /**
@@ -170,7 +170,12 @@ const VOICE_PREF_KEY = 'jarvis.voice'
  * profile, so they survive restarts, and they win over the .env defaults.
  */
 const PROFILE_KEY = 'jarvis.voiceProfile'
-export type VoiceProfile = { voice?: string; rate?: number; pitch?: number }
+/**
+ * `voice` is used while online (a natural voice, or one on the PC);
+ * `offlineVoice` (always one on the PC) when there is no internet, and
+ * whenever the online voice fails. They may be the same voice.
+ */
+export type VoiceProfile = { voice?: string; offlineVoice?: string; rate?: number; pitch?: number }
 
 function profile(): VoiceProfile | null {
   try {
@@ -186,7 +191,76 @@ const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt
 }
 
-/** Installed English voices, for choosing one. */
+// ---------------------------------------------------------------------------
+// Natural voices
+// ---------------------------------------------------------------------------
+
+/**
+ * Microsoft's online neural voices, spoken through the bridge
+ * (bridge/voices.mjs): hundreds of them, in every language, free. A chosen one
+ * is saved as "natural:en-GB-RyanNeural". They need the internet; offline, or
+ * if one fails, a voice installed on the PC speaks instead.
+ */
+export const NATURAL = 'natural:'
+export type NaturalVoice = { id: string; name: string; lang: string; langName: string; gender: string }
+export const isNatural = (name: string | null | undefined) => String(name ?? '').startsWith(NATURAL)
+
+/**
+ * The standard online voices offered in setup: two per language, a man and
+ * a woman. (Any other natural voice can still be asked for by name.)
+ */
+export const STANDARD_VOICES: { id: string; name: string; language: string; gender: 'Male' | 'Female' }[] = [
+  { id: 'en-GB-RyanNeural', name: 'Ryan', language: 'English', gender: 'Male' },
+  { id: 'en-GB-SoniaNeural', name: 'Sonia', language: 'English', gender: 'Female' },
+  { id: 'ta-IN-ValluvarNeural', name: 'Valluvar', language: 'Tamil', gender: 'Male' },
+  { id: 'ta-IN-PallaviNeural', name: 'Pallavi', language: 'Tamil', gender: 'Female' },
+  { id: 'hi-IN-MadhurNeural', name: 'Madhur', language: 'Hindi', gender: 'Male' },
+  { id: 'hi-IN-SwaraNeural', name: 'Swara', language: 'Hindi', gender: 'Female' },
+  { id: 'ml-IN-MidhunNeural', name: 'Midhun', language: 'Malayalam', gender: 'Male' },
+  { id: 'ml-IN-SobhanaNeural', name: 'Sobhana', language: 'Malayalam', gender: 'Female' },
+  { id: 'te-IN-MohanNeural', name: 'Mohan', language: 'Telugu', gender: 'Male' },
+  { id: 'te-IN-ShrutiNeural', name: 'Shruti', language: 'Telugu', gender: 'Female' },
+]
+
+/** The voice used offline (a PC voice), or '' for the automatic choice. */
+export function currentOfflineVoice(): string {
+  return profile()?.offlineVoice ?? ''
+}
+
+let naturalList: NaturalVoice[] = []
+/** The natural voices (fetched once; empty if the bridge can't offer them). */
+export async function loadNaturalVoices(): Promise<NaturalVoice[]> {
+  if (naturalList.length) return naturalList
+  try {
+    const res = await fetch(`${BRIDGE_HTTP_URL}/voices`, { cache: 'no-store' })
+    if (res.ok) naturalList = ((await res.json()).natural ?? []) as NaturalVoice[]
+  } catch {
+    /* bridge down: none */
+  }
+  return naturalList
+}
+
+/** "natural:en-GB-RyanNeural" -> "Ryan · English (United Kingdom)". */
+export function naturalLabel(name: string): string {
+  const id = name.slice(NATURAL.length)
+  const v = naturalList.find((x) => x.id === id)
+  return v ? `${v.name} · ${v.langName}` : id.replace(/Neural$/, '')
+}
+
+/** One sentence in a natural voice, as a playable URL (null if it failed). */
+async function fetchNatural(text: string, id: string, rate: number): Promise<string | null> {
+  const res = await fetch(`${BRIDGE_HTTP_URL}/voice/say`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, voice: id.replace(NATURAL, ''), rate }),
+  })
+  return res.ok ? URL.createObjectURL(await res.blob()) : null
+}
+
+const online = () => !offlineVoice && navigator.onLine !== false
+
+let previewAudio: HTMLAudioElement | null = null
+
 /**
  * Say a sample sentence in one voice, for the setup screen's voice list. Marked
  * as his own speech while it plays, so the microphone's echo check ignores it
@@ -194,6 +268,23 @@ const clamp = (v: unknown, lo: number, hi: number, dflt: number) => {
  * one before.
  */
 export function previewVoice(name: string, text: string, rate?: number) {
+  previewAudio?.pause()
+  previewAudio = null
+  if (isNatural(name)) {
+    speechSynthesis.cancel()
+    void fetchNatural(text, name, rate ?? currentRate()).then((url) => {
+      if (!url) return
+      const a = new Audio(url)
+      previewAudio = a
+      a.onplaying = () => setSpeaking(text)
+      a.onended = a.onerror = a.onpause = () => {
+        setSpeaking('')
+        URL.revokeObjectURL(url)
+      }
+      void a.play().catch(() => setSpeaking(''))
+    })
+    return
+  }
   const v = speechSynthesis.getVoices().find((x) => x.name === name)
   if (!v) return
   speechSynthesis.cancel()
@@ -219,23 +310,38 @@ export function listVoices(): { name: string; lang: string }[] {
  * effect, or an error naming what could not be found.
  */
 export function setVoiceProfile(
-  change: { voice?: string | null; rate?: number | null; pitch?: number | null } | null,
+  change: { voice?: string | null; offlineVoice?: string | null; rate?: number | null; pitch?: number | null } | null,
 ): { voice: string; rate: number; pitch: number } | { error: string } {
   if (change === null) {
     localStorage.removeItem(PROFILE_KEY)
   } else {
     const next: VoiceProfile = { ...(profile() ?? {}) }
-    if (change.voice) {
+    if (change.voice && isNatural(change.voice)) {
+      next.voice = change.voice
+    } else if (change.voice) {
       const want = change.voice.toLowerCase().trim()
       const all = speechSynthesis.getVoices()
       const hit =
         all.find((v) => v.name.toLowerCase() === want) ??
         all.find((v) => v.name.toLowerCase().includes(want)) ??
         all.find((v) => want.split(/\s+/).every((w) => v.name.toLowerCase().includes(w)))
-      if (!hit) {
-        return { error: `No installed voice matches "${change.voice}". Installed: ${listVoices().map((v) => v.name).join(', ')}` }
+      // Not on the PC: one of the natural voices, by name ("Ryan", "Pallavi")
+      // or id ("en-GB-RyanNeural"); English first when names repeat.
+      const words = want.split(/\s+/)
+      const nat = hit
+        ? null
+        : [...naturalList]
+            .sort((a, b) => Number(/^en/.test(b.lang)) - Number(/^en/.test(a.lang)))
+            .find((v) => v.id.toLowerCase() === want || words.every((w) => `${v.name} ${v.id} ${v.langName}`.toLowerCase().includes(w)))
+      if (!hit && !nat) {
+        return { error: `No voice matches "${change.voice}". On this PC: ${listVoices().map((v) => v.name).join(', ')}; natural voices: any of ${naturalList.length} (e.g. Ryan, Sonia, Guy, Pallavi).` }
       }
-      next.voice = hit.name
+      next.voice = hit ? hit.name : NATURAL + nat!.id
+    }
+    // Offline: only a voice installed on the PC can work.
+    if (change.offlineVoice === null) delete next.offlineVoice
+    else if (change.offlineVoice && speechSynthesis.getVoices().some((v) => v.name === change.offlineVoice)) {
+      next.offlineVoice = change.offlineVoice
     }
     if (change.rate != null) next.rate = clamp(change.rate, 0.6, 1.8, 1)
     if (change.pitch != null) next.pitch = clamp(change.pitch, 0.5, 1.5, 1)
@@ -243,7 +349,8 @@ export function setVoiceProfile(
   }
   cachedVoice = undefined
   const p = profile()
-  return { voice: pickVoice()?.name ?? 'default', rate: p?.rate ?? SYSTEM_RATE, pitch: p?.pitch ?? 1 }
+  const voice = isNatural(p?.voice) ? naturalLabel(p!.voice!) : (pickVoice()?.name ?? 'default')
+  return { voice, rate: p?.rate ?? SYSTEM_RATE, pitch: p?.pitch ?? 1 }
 }
 
 /** Speaking pace for the system voice. */
@@ -337,16 +444,20 @@ function pickVoice(): SpeechSynthesisVoice | null {
   if (!all.length) return null // not loaded yet — try again next utterance
 
   if (offlineVoice || navigator.onLine === false) {
-    const local = all.filter((v) => v.localService && /^en/i.test(v.lang))
-    const mine = profile()?.voice
-    const keep = local.find((v) => v.name === mine)
+    const local = all.filter((v) => v.localService)
+    const p = profile()
+    // The offline voice chosen in setup, else the online one if it is on the PC.
+    const keep = local.find((v) => v.name === p?.offlineVoice) ?? local.find((v) => v.name === p?.voice)
     // Not cached: the online voice comes back as soon as the network does.
-    return keep ?? local.find((v) => /david|mark|george|ravi/i.test(v.name)) ?? local[0] ?? null
+    return keep ?? local.find((v) => /david|mark|george|ravi/i.test(v.name)) ?? local.find((v) => /^en/i.test(v.lang)) ?? local[0] ?? null
   }
 
-  // The user's own choice, made by asking him to change his voice.
-  const mine = profile()?.voice
-  if (mine) {
+  // The user's own choice, made in setup or by asking him to change his voice.
+  // A natural voice is not here (it speaks through the bridge); when it can't,
+  // the offline voice stands in.
+  const p = profile()
+  for (const mine of [p?.voice, p?.offlineVoice]) {
+    if (!mine) continue
     const hit = all.find((v) => v.name === mine)
     if (hit) return (cachedVoice = hit)
   }
@@ -377,6 +488,8 @@ function pickVoice(): SpeechSynthesisVoice | null {
  *  always naming a speechSynthesis voice that a cloud or neural engine has
  *  quietly replaced. */
 export function currentVoiceName(): string {
+  const mine = profile()?.voice
+  if (isNatural(mine)) return mine!
   if (USE_ELEVENLABS || caps().tts) return 'ElevenLabs'
   if (TTS_ENGINE === 'kokoro' && kokoro.isReady()) return kokoro.currentVoice()
   if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
@@ -407,6 +520,11 @@ if (typeof speechSynthesis !== 'undefined') {
     pickVoice()
   })
   pickVoice()
+  // The natural voices too, so "use the Ryan voice" finds one by name. The
+  // bridge may still be starting: try again a little later if it was.
+  void loadNaturalVoices().then((l) => {
+    if (!l.length) window.setTimeout(() => void loadNaturalVoices(), 15_000)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +737,13 @@ export function createSpeaker(): Speaker {
 
   /** null means "no audio pipeline, use the system voice directly". */
   function synthesise(text: string): Promise<string | null> | null {
+    // A natural voice the user picked wins over every default. Offline, or if
+    // it fails (null), the sentence is spoken by a PC voice instead.
+    const mine = profile()
+    if (isNatural(mine?.voice) && online()) {
+      diag.engine = 'natural'
+      return fetchNatural(text, mine!.voice!, mine?.rate ?? SYSTEM_RATE).catch(() => null)
+    }
     // Prefer the ElevenLabs voice whenever the bridge reports it is available —
     // for a demo the timbre is worth the round trip, and this is what makes the
     // premium path automatic with no flag to set. It falls back to the browser
@@ -841,7 +966,8 @@ export function createSpeaker(): Speaker {
       // see the onplaying handler below.
       diag.spoken++
       diag.lastText = text.slice(0, 60)
-      diag.voice = diag.engine === 'kokoro' ? KOKORO_VOICE : 'ElevenLabs'
+      diag.voice =
+        diag.engine === 'kokoro' ? KOKORO_VOICE : diag.engine === 'natural' ? naturalLabel(profile()?.voice ?? '') : 'ElevenLabs'
 
       let read: (() => number) | null = null
       const ctx = outputContext()

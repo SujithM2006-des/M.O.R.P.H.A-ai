@@ -2453,3 +2453,12 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
 .vg-ask .vg-stop:focus-visible { outline: 2px solid #ff8a94; outline-offset: 2px; }
 @keyframes vg-stop-in { from { opacity: 0; transform: translateX(-8px); } }
 @media (max-width: 900px) { .vg-ask .vg-stop span { display: none; } .vg-ask .vg-stop { padding: 0 10px; } }
+
+/* The chat never grows wider than its column (a long title, link or line
+   was pushing it under the right-hand panel, with "Orb view" behind the orb). */
+.vg-chat .vg-centre { grid-template-columns: minmax(0, 1fr); }
+.vg-chatview,
+.vg-chat-scroll { min-width: 0; max-width: 100%; }
+.vg-chat-list { min-width: 0; max-width: min(840px, 100%); }
+.vg-cm-user { max-width: min(78%, 680px); }
+.vg-chat-head { min-width: 0; }

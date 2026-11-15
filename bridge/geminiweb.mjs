@@ -15,7 +15,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -1090,4 +1090,147 @@ async function getKey(provider, say) {
     await page?.close().catch(() => {})
     await b.close().catch(() => {})
   }
+}
+
+// ============================================================ clips already in Flow
+//
+// Clips the user (or JARVIS) already made in Google Flow, used as they are:
+// listed by title per project, downloaded in story order (oldest first).
+// A clip's picture in Flow's picker is its thumbnail; that address plus
+// "=mm,22,15" is the video itself.
+
+/** The user's Flow projects ({name, url}), newest first; JARVIS's own marked. */
+export async function flowProjects() {
+  await ensureChrome()
+  const b = await connect()
+  let page
+  try {
+    page = await b.contexts()[0].newPage()
+    await page.goto(FLOW, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    await page.waitForTimeout(5000)
+    await dismissFlowNotices(page)
+    const mine = readFlow().project
+    const list = await page.evaluate(() =>
+      [...document.querySelectorAll('a[href*="/project/"]')].map((a) => {
+        let card = a
+        for (let i = 0; i < 5 && card && !/\S/.test((card.innerText || '').replace(/Open project|edit|delete/g, '')); i++) card = card.parentElement
+        const name = (card?.innerText || '').split('\n').map((x) => x.trim()).filter((x) => x && !/^(Open project|edit|delete|more_vert)$/.test(x))[0] || 'Untitled'
+        return { name, url: new URL(a.getAttribute('href'), location.href).href.split('?')[0] }
+      }),
+    )
+    const seen = new Set()
+    return list.filter((p) => !seen.has(p.url) && seen.add(p.url)).map((p) => ({ ...p, jarvis: p.url === mine }))
+  } finally {
+    await page?.close().catch(() => {})
+    await b.close().catch(() => {})
+  }
+}
+
+/** A project by name, address, or "jarvis" / nothing for JARVIS's own. */
+async function projectUrl(which) {
+  const mine = readFlow().project
+  if (!which || /^(jarvis|mine|yours|default)$/i.test(String(which).trim())) {
+    if (!mine) throw new Error("I don't have a Flow project yet.")
+    return mine
+  }
+  if (/^https:\/\/flow\.google\.com\/project\//.test(which)) return which.split('?')[0]
+  const all = await flowProjects()
+  const hit = all.find((p) => p.name.toLowerCase() === String(which).toLowerCase()) ?? all.find((p) => p.name.toLowerCase().includes(String(which).toLowerCase()))
+  if (!hit) throw new Error(`No Flow project called "${which}". Projects: ${all.map((p) => p.name).join(', ')}.`)
+  return hit.url
+}
+
+/** The videos in a Flow project: [{title, src}] newest first (src: the thumbnail address). */
+async function readClips(page) {
+  await page.getByRole('button', { name: 'Add ingredients to the prompt box' }).last().click({ timeout: 15_000 })
+  await page.waitForTimeout(1500)
+  await page.locator('.cdk-overlay-container [role="tab"]').filter({ hasText: 'Videos' }).first().click({ timeout: 8000 })
+  await page.waitForTimeout(2000)
+  const clips = new Map()
+  for (let i = 0; i < 12; i++) {
+    const got = await page.evaluate(() =>
+      [...document.querySelectorAll('.cdk-overlay-container [role="option"]')].map((o) => ({
+        title: o.innerText.replace(/\s+/g, ' ').replace(/\bVideo\b\s*$/, '').trim(),
+        src: ([...o.querySelectorAll('img, video')].map((m) => m.currentSrc || m.src || '').find((s) => /flow\.google\.com\/asb|flow-content/.test(s)) || '').replace(/=[^/]*$/, ''),
+      })),
+    )
+    const before = clips.size
+    for (const c of got) if (c.src && !clips.has(c.src)) clips.set(c.src, c)
+    if (clips.size === before && i > 0) break
+    await page.locator('.cdk-overlay-container [role="option"]').last().scrollIntoViewIfNeeded().catch(() => {})
+    await page.mouse.wheel(0, 600)
+    await page.waitForTimeout(600)
+  }
+  await clearFlowOverlays(page)
+  return [...clips.values()]
+}
+
+/** The clips in a project (JARVIS's own unless named), newest first: [{n, title}]. */
+export function flowListClips(project) {
+  const run = busy.then(async () => {
+    const url = await projectUrl(project)
+    await ensureChrome()
+    const b = await connect()
+    let page
+    try {
+      page = await b.contexts()[0].newPage()
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await page.waitForTimeout(6000)
+      await dismissFlowNotices(page)
+      return { project: url, clips: (await readClips(page)).map((c, i) => ({ n: i + 1, title: c.title })) }
+    } finally {
+      await page?.close().catch(() => {})
+      await b.close().catch(() => {})
+    }
+  })
+  busy = run.catch(() => {})
+  return run
+}
+
+/**
+ * Download clips from a Flow project into `folder`, in story order (oldest
+ * first) unless `order` is 'newest'. `pick`: titles (or parts of them) or
+ * numbers from flowListClips; empty for all. Returns [{title, file}] in order.
+ */
+export function flowDownloadClips({ project, pick = [], order = 'story', folder }) {
+  const run = busy.then(async () => {
+    const url = await projectUrl(project)
+    await ensureChrome()
+    const b = await connect()
+    let page
+    try {
+      const ctx = b.contexts()[0]
+      page = await ctx.newPage()
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await page.waitForTimeout(6000)
+      await dismissFlowNotices(page)
+      const all = await readClips(page)
+      if (!all.length) throw new Error('That Flow project has no videos.')
+      let chosen = all
+      if (pick.length) {
+        chosen = pick.map((p) => {
+          const n = Number(p)
+          const hit = Number.isInteger(n) && n >= 1 && n <= all.length ? all[n - 1] : all.find((c) => c.title.toLowerCase().includes(String(p).toLowerCase()))
+          if (!hit) throw new Error(`No clip matching "${p}". Clips: ${all.map((c, i) => `${i + 1}. ${c.title}`).join('; ')}`)
+          return hit
+        })
+      } else if (order !== 'newest') chosen = [...all].reverse()
+      mkdirSync(folder, { recursive: true })
+      const out = []
+      for (const [i, c] of chosen.entries()) {
+        const r = await ctx.request.get(`${c.src}=mm,22,15`, { timeout: 180_000 })
+        if (!r.ok() || !/video/.test(r.headers()['content-type'] ?? '')) throw new Error(`Couldn't download "${c.title}" (HTTP ${r.status()}).`)
+        const safe = c.title.replace(/[<>:"/\\|?*…]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'clip'
+        const file = join(folder, `${String(i + 1).padStart(2, '0')} ${safe}.mp4`)
+        writeFileSync(file, await r.body())
+        out.push({ title: c.title, file })
+      }
+      return out
+    } finally {
+      await page?.close().catch(() => {})
+      await b.close().catch(() => {})
+    }
+  })
+  busy = run.catch(() => {})
+  return run
 }

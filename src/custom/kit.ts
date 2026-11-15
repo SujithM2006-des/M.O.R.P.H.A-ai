@@ -312,10 +312,30 @@ export function openSetup() {
   window.dispatchEvent(new Event('jarvis-setup'))
 }
 
-/** The assistant's name as a title: "J.A.R.V.I.S." unless renamed. */
+/**
+ * The assistant's name as it is said: the dots dropped ("J.A.R.V.I.S." ->
+ * "JARVIS"), so speech reads it as one word. Same rule as bridge/profile.mjs.
+ */
+export function spokenName(n: string | null | undefined): string {
+  const s = String(n ?? '')
+    .replace(/\.+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return s || 'JARVIS'
+}
+
+/** The assistant's name as it is written: a dot after every letter ("Friday" -> "F.R.I.D.A.Y."). */
+export function dottedName(n: string | null | undefined): string {
+  return spokenName(n)
+    .toUpperCase()
+    .split(' ')
+    .map((w) => [...w].filter((c) => /[\p{L}\p{N}]/u.test(c)).join('.') + '.')
+    .join(' ')
+}
+
+/** The assistant's name as a title (window, wordmark): dotted, "J.A.R.V.I.S.". */
 export function assistantTitle(p: Profile | null): string {
-  const n = (p?.assistant || 'JARVIS').trim()
-  return n.toUpperCase() === 'JARVIS' ? 'J.A.R.V.I.S.' : n.toUpperCase()
+  return dottedName(p?.assistant)
 }
 
 /** A calendar event: a reminder, pending or already past. */
