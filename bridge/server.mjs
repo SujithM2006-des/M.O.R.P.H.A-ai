@@ -222,6 +222,9 @@ const askOne = (msg) => {
   return ws ? 1 : 0
 }
 
+/** Offline greetings waiting for the window to finish speaking: id -> resolve. */
+const GREETS = new Map()
+
 let popupProc = null
 const PS_ARGS = ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File']
 
@@ -1457,6 +1460,22 @@ const handleRequest = async (req, res) => {
     }
     res.writeHead(ok ? 200 : 500, { ...cors, 'content-type': 'application/json; charset=utf-8' })
     return res.end(JSON.stringify({ ok }))
+  }
+  // Offline wake: the listener asks the window to greet ("Yes, sir?" with the
+  // wake sound, as online) and waits until it has, so it does not hear it.
+  // { greeted: false } when no window is open (the listener chimes instead).
+  if (req.method === 'POST' && req.url === '/offline-greet') {
+    const id = `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`
+    let greeted = false
+    if (askOne({ type: 'greet', id })) {
+      greeted = await Promise.race([
+        new Promise((resolve) => GREETS.set(id, () => resolve(true))),
+        new Promise((resolve) => setTimeout(() => resolve(true), 6000)), // a silent window: go on anyway
+      ])
+      GREETS.delete(id)
+    }
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+    return res.end(JSON.stringify({ greeted }))
   }
   // A long job finished while the window was hidden: a Windows notification.
   if (req.method === 'POST' && req.url === '/notify') {
@@ -3312,6 +3331,12 @@ wss.on('connection', (socket) => {
     if (msg.type === 'end-session') {
       const sid = sessionOf(msg)
       if (sid !== 'main') conversations.get(sid)?.close()
+    }
+
+    // The window finished the offline greeting: the listener may listen now.
+    if (msg.type === 'greet-done' && typeof msg.id === 'string') {
+      GREETS.get(msg.id)?.()
+      GREETS.delete(msg.id)
     }
 
     // The window's phase (listening, thinking, speaking …), for the popup.

@@ -133,6 +133,17 @@ export function watchCircle(fn: (path: string) => void) {
   onCircle = fn
 }
 
+/**
+ * Offline, the background listener hears the command itself; first it asks
+ * the window to greet ("Yes, sir?", with the wake sound) just as online.
+ * Resolve once the greeting has been spoken: the bridge tells the listener,
+ * which only then starts listening (so it does not hear the greeting).
+ */
+let onGreet: (() => Promise<void>) | null = null
+export function watchGreet(fn: () => Promise<void>) {
+  onGreet = fn
+}
+
 /** The popup's mic button was tapped. */
 let onMic: (() => void) | null = null
 export function watchMic(fn: () => void) {
@@ -299,6 +310,13 @@ function dispatch(ws: WebSocket) {
       onRemoteWake?.()
     } else if ((msg.type as string) === 'mic') {
       onMic?.()
+    } else if ((msg.type as string) === 'greet') {
+      const id = String((msg as unknown as { id?: unknown }).id ?? '')
+      const done = () => {
+        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'greet-done', id }))
+      }
+      if (onGreet) onGreet().then(done, done)
+      else done()
     } else if ((msg.type as string) === 'mute') {
       onMute?.(Boolean((msg as unknown as { on?: unknown }).on))
     } else if ((msg.type as string) === 'popup-ask') {

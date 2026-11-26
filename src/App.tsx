@@ -34,6 +34,7 @@ import {
   watchRemoteWake,
   watchPopupAsk,
   watchMic,
+  watchGreet,
   watchMute,
   watchCircle,
   reportPhase,
@@ -834,6 +835,34 @@ export default function App() {
       store.getState().setCaption('')
       const phase = store.getState().phase
       if (on && (phase === 'listening' || phase === 'waking')) goDormant()
+    })
+
+    // Offline wake (the background listener hears the command, Chrome's
+    // recogniser cannot): greet exactly as online — the wake sound and
+    // "Yes, sir?" — and show him listening. Resolves when the greeting is
+    // spoken; only then does the listener start to listen. Back to standby by
+    // itself if no request follows.
+    let offlineListen: ReturnType<typeof setTimeout> | null = null
+    watchGreet(async () => {
+      const phase = store.getState().phase
+      if (phase === 'offline' || phase === 'boot') return
+      silence()
+      store.getState().setError(null)
+      sfx.play('wake')
+      store.getState().setPhase('listening')
+      if (offlineListen) clearTimeout(offlineListen)
+      offlineListen = setTimeout(() => {
+        offlineListen = null
+        if (store.getState().phase === 'listening') store.getState().setPhase('dormant')
+      }, 20_000)
+      if (WAKE_GREETING_SPOKEN) {
+        const greeting = createSpeaker()
+        speaker.current = greeting
+        greeting.say(attention())
+        await greeting.end()
+      } else {
+        await new Promise((r) => setTimeout(r, 450)) // the wake sound
+      }
     })
 
     watchMic(() => {

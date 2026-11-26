@@ -195,6 +195,34 @@ def brain_mode():
         return None
 
 
+def greet():
+    """Offline: the window greets as it does online (the wake sound and "Yes,
+    sir?" in his voice); returns once it has finished, so listening starts
+    after it. False if no window is open (then a chime says he is listening)."""
+    try:
+        try:
+            token = (HOME / "bridge-token").read_text().strip()
+        except OSError:
+            token = ""
+        req = urllib.request.Request(
+            "http://127.0.0.1:8787/offline-greet", data=b"{}", method="POST",
+            headers={"x-jarvis-token": token, "content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return bool(json.load(r).get("greeted"))
+    except Exception:
+        return False
+
+
+def drain(stream):
+    """Throw away audio already buffered (the greeting, heard by the mic)."""
+    try:
+        while stream.read_available >= CHUNK:
+            stream.read(CHUNK)
+    except Exception:
+        pass
+
+
 def ask_bridge(text):
     """Hand a request straight to JARVIS, as if typed in the popup."""
     try:
@@ -495,8 +523,8 @@ def offline_capture(stream, vosk_model, why, recent=None):
     Said in one breath ("hey jarvis, what's my battery level"), the command is
     already in `recent` — the last few seconds of audio — because the phrase
     is only recognised once the speaker stops: listening *after* it heard
-    nothing (measured: "nothing heard" three times in a row). Otherwise a
-    two-tone chime and a notification say he is listening, and he waits."""
+    nothing (measured: "nothing heard" three times in a row). Otherwise the
+    window greets ("Yes, sir?") as it does online, and then he listens."""
     model = BIG["model"] or vosk_model
     if recent:
         pcm = b"".join(recent)
@@ -505,19 +533,21 @@ def offline_capture(stream, vosk_model, why, recent=None):
         if not said:
             said = grammar_command(model, pcm, with_wake=True) or command_after_name(transcribe(model, pcm))
         if len(said.split()) >= 2:
-            tones((880, 90), (1320, 110))
             ok = ask_bridge(said)
             log(f'offline command ({why}, same breath): "{said}"' + ("" if ok else " (could not reach JARVIS)"))
             return
-    tones((880, 90), (1320, 110))
-    notify_async("Listening (offline)", "Say your command now.")
+    # Greeted as online — the wake sound and "Yes, sir?" in his voice, from
+    # the window — instead of a beep and a Windows notification (which kept
+    # piling up on screen). Only with no window open does a chime say so.
+    if not greet():
+        tones((880, 90), (1320, 110))
+    drain(stream)  # the greeting itself, picked up by the mic
     said = capture_command(stream, model, limit=14.0, quiet=1.5, save=False)
     clip_guard()
     if said:
         ok = ask_bridge(said)
         log(f'offline command ({why}): "{said}" (loudest {CAPTURE["loudest"]}, clipped {clipped_share():.1%})' + ("" if ok else " (could not reach JARVIS)"))
     else:
-        tones((440, 220))  # nothing heard: try again
         log(f"offline ({why}): nothing heard (loudest {CAPTURE['loudest']})")
 
 

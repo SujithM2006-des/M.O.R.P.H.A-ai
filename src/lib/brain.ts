@@ -105,6 +105,11 @@ export function watchMic(fn: () => void): void {
   if (usingBridge) bridge.watchMic(fn)
 }
 
+/** Offline: greet as online before the background listener hears the command. Bridge only. */
+export function watchGreet(fn: () => Promise<void>): void {
+  if (usingBridge) bridge.watchGreet(fn)
+}
+
 /** Answer a named request from the bridge (voice-analyze, voice-set). Bridge only. */
 export function handleRequest(
   kind: string,
