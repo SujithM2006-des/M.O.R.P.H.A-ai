@@ -51,12 +51,38 @@ async function online() {
   } catch {
     /* automatic */
   }
-  try {
-    await fetch('https://api.anthropic.com', { method: 'HEAD', signal: AbortSignal.timeout(3500) })
-    return true
-  } catch {
-    return false
+  // Two places at once: one slow answer from one host on a weak connection
+  // used to count as "the internet is down".
+  const reach = (url) =>
+    fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(4000) }).then(
+      () => true,
+      () => Promise.reject(new Error('unreachable')),
+    )
+  return Promise.any([reach('https://api.anthropic.com'), reach('https://www.gstatic.com/generate_204')]).then(
+    () => true,
+    () => false,
+  )
+}
+
+/**
+ * The online / offline answer only changes after two checks in a row agree
+ * (about 12 s). The log showed it flipping offline, online and offline again
+ * within minutes; each flip reconnects every window on another model and
+ * changes who hears the voice, so a request made at the moment of a flip went
+ * astray. The first check at start counts at once.
+ */
+let disagreed = 0
+function steady(on) {
+  if (!state.checkedAt || on === state.online) {
+    disagreed = 0
+    return on
   }
+  disagreed++
+  if (disagreed >= 2) {
+    disagreed = 0
+    return on
+  }
+  return state.online
 }
 
 async function ollamaModels() {
@@ -74,7 +100,7 @@ export async function checkBrain() {
   const [on, models] = await Promise.all([online(), ollamaModels()])
   const has = (name) => models.includes(name) || models.includes(`${name}:latest`)
   const model = PREFERRED.find(has) ?? models.find((m) => !/embed/i.test(m)) ?? null
-  state = { online: on, model, models, checkedAt: Date.now() }
+  state = { online: steady(on), model, models, checkedAt: Date.now() }
   return state
 }
 

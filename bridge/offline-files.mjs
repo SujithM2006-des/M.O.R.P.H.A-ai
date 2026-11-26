@@ -82,6 +82,24 @@ function freeName(dir, name, taken = new Set()) {
   return n
 }
 
+/** One step ("cut the neo browser setup"), or null if it is not one of ours. */
+function parseStep(s) {
+  let m
+  if ((m = /^(?:open|go to|go into|show)\s+(?:the\s+|my\s+)?([a-z]+)(?:\s+folder)?$/.exec(s)) && KNOWN[m[1]]) {
+    return { op: 'open', place: m[1] }
+  }
+  if ((m = /^(?:create|make|add)\s+(?:a\s+)?(?:new\s+)?folder(?:\s+(?:called|named)\s+(.+?))?(?:\s+(?:in|inside|on|at)\s+(.+))?$/.exec(s))) {
+    return { op: 'mkdir', name: m[1]?.trim() || null, place: m[2]?.trim() || null }
+  }
+  if ((m = new RegExp(`^(cut|move|copy)\\s+(.+?)(?:\\s+(?:from|in)\\s+(?:the\\s+|my\\s+)?(${KNOWN_RE}))?(?:\\s+(?:to|into|in to|inside)\\s+(.+))?$`).exec(s))) {
+    return { op: m[1] === 'copy' ? 'copy' : 'move', what: m[2].trim(), from: m[3] || null, to: m[4]?.trim() || null }
+  }
+  if ((m = /^paste\s+(?:it|them|that|this)?\s*(?:in|into|to|inside|at)\s+(.+)$/.exec(s))) {
+    return { op: 'paste', to: m[1].trim() }
+  }
+  return null
+}
+
 /** Split into steps; null if any step is not one of ours. */
 export function plan(text) {
   const t = String(text)
@@ -92,24 +110,30 @@ export function plan(text) {
     .replace(/\b(?:please|can you|could you|for me)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  const parts = t
-    .split(/\s*(?:,|;|\band then\b|\bthen\b|\band\b)\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean)
+  // Separators kept, so a piece that is not a step on its own can be joined
+  // back to the one before: "move tom and jerry.mp4 to documents" is one step,
+  // not "move tom" + "jerry.mp4 to documents".
+  const bits = t.split(/(\s*(?:,|;|\band then\b|\bthen\b|\band\b)\s*)/)
   const steps = []
-  for (const s of parts) {
-    let m
-    if ((m = /^(?:open|go to|go into|show)\s+(?:the\s+|my\s+)?([a-z]+)(?:\s+folder)?$/.exec(s)) && KNOWN[m[1]]) {
-      steps.push({ op: 'open', place: m[1] })
-    } else if ((m = /^(?:create|make|add)\s+(?:a\s+)?(?:new\s+)?folder(?:\s+(?:called|named)\s+(.+?))?(?:\s+(?:in|inside|on|at)\s+(.+))?$/.exec(s))) {
-      steps.push({ op: 'mkdir', name: m[1]?.trim() || null, place: m[2]?.trim() || null })
-    } else if ((m = new RegExp(`^(cut|move|copy)\\s+(.+?)(?:\\s+(?:from|in)\\s+(?:the\\s+|my\\s+)?(${KNOWN_RE}))?(?:\\s+(?:to|into|in to|inside)\\s+(.+))?$`).exec(s))) {
-      steps.push({ op: m[1] === 'copy' ? 'copy' : 'move', what: m[2].trim(), from: m[3] || null, to: m[4]?.trim() || null })
-    } else if ((m = /^paste\s+(?:it|them|that|this)?\s*(?:in|into|to|inside|at)\s+(.+)$/.exec(s))) {
-      steps.push({ op: 'paste', to: m[1].trim() })
-    } else {
-      return null
+  const raws = []
+  for (let i = 0; i < bits.length; i += 2) {
+    const s = bits[i].trim()
+    if (!s) continue
+    let step = parseStep(s)
+    if (!step && raws.length) {
+      const joined = `${raws[raws.length - 1]}${bits[i - 1]}${s}`
+      step = parseStep(joined)
+      if (step) {
+        steps.pop()
+        raws.pop()
+        steps.push(step)
+        raws.push(joined)
+        continue
+      }
     }
+    if (!step) return null
+    steps.push(step)
+    raws.push(s)
   }
   // Worth it only for file work (a lone "open downloads" is the other shortcut's).
   return steps.some((x) => x.op !== 'open') ? steps : null
@@ -120,7 +144,27 @@ export function plan(text) {
  * Returns what to say, or null when it is not such a command (or a step
  * could not be resolved — then nothing has been changed).
  */
-export async function offlineFileSteps(text, { open = async () => {}, home = homedir() } = {}) {
+// One file job at a time, and the same command arriving again within a few
+// seconds (sent twice — measured in the log: one request, two runs) is
+// answered with what was done rather than done a second time.
+let queue = Promise.resolve()
+const recent = new Map() // command -> { at, said }
+const REPEAT_MS = 20_000
+
+export function offlineFileSteps(text, opts = {}) {
+  const key = String(text).toLowerCase().replace(/^\[.*?\]\s*/, '').replace(/[^a-z0-9]+/g, ' ').trim()
+  const run = queue.then(async () => {
+    const last = recent.get(key)
+    if (last && Date.now() - last.at < REPEAT_MS) return `That's already done: ${last.said.replace(/^Done: /, '')}`
+    const said = await runSteps(text, opts)
+    if (said) recent.set(key, { at: Date.now(), said })
+    return said
+  })
+  queue = run.catch(() => undefined)
+  return run
+}
+
+async function runSteps(text, { open = async () => {}, home = homedir() } = {}) {
   const steps = plan(text)
   if (!steps) return null
   let here = null // the folder in play
@@ -183,6 +227,10 @@ export async function offlineFileSteps(text, { open = async () => {}, home = hom
       mkdirSync(x.dir, { recursive: true })
       said.push(`made the folder "${basename(x.dir)}"`)
     } else {
+      if (!existsSync(x.src)) {
+        said.push(`${basename(x.src)} wasn't there any more, so I left it`)
+        continue
+      }
       const dest = join(x.to, freeName(x.to, basename(x.src)))
       if (x.op === 'copy') cpSync(x.src, dest, { recursive: true })
       else {

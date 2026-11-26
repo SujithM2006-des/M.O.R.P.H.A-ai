@@ -339,6 +339,31 @@ def transcribe(model, pcm):
     return " ".join(p for p in parts if p).strip()
 
 
+def clip_guard():
+    """The command just heard clipped (peaks at the top of the range): the
+    Windows mic level is too high — Chrome's gain control has pushed it to
+    100% before — and clipped speech is what garbled offline commands
+    ("vantage they're paying now"). Lower it 15 points, never below 50%.
+    Only after real clipping, so a level the user chose is otherwise left
+    alone. In the background: the helper takes a second or two."""
+    if CAPTURE["loudest"] < 32000:
+        return
+
+    def run():
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                 str(ROOT / "scripts" / "mic-level.ps1"), "-Lower", "15", "-Floor", "50"],
+                capture_output=True, text=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            log(f"speech clipped (loudest {CAPTURE['loudest']}) - microphone level now {r.stdout.strip()}%")
+        except Exception as err:
+            log(f"speech clipped, could not lower the microphone level: {err}")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def offline_capture(stream, vosk_model, why, recent=None):
     """Offline: hear the command with Vosk and hand it to JARVIS. For "Hey
     Jarvis" and for the mic button alike. Uses the big model when it is
@@ -361,6 +386,7 @@ def offline_capture(stream, vosk_model, why, recent=None):
     tones((880, 90), (1320, 110))
     notify_async("Listening (offline)", "Say your command now.")
     said = capture_command(stream, model, limit=14.0, quiet=1.5, save=False)
+    clip_guard()
     if said:
         ok = ask_bridge(said)
         log(f'offline command ({why}): "{said}"' + ("" if ok else " (could not reach JARVIS)"))
