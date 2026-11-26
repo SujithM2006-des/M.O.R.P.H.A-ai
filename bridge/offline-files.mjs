@@ -98,6 +98,11 @@ function parseStep(s) {
   if ((m = /^paste\s+(?:it|them|that|this)?\s*(?:in|into|to|inside|at)\s+(.+)$/.exec(s))) {
     return { op: 'paste', to: m[1].trim() }
   }
+  // "paste the setup file inside the new folder" with nothing cut first: a
+  // copy (the safe reading — the original stays where it is).
+  if ((m = new RegExp(`^paste\\s+(.+?)(?:\\s+(?:from|in)\\s+(?:the\\s+|my\\s+)?(${KNOWN_RE}))?\\s+(?:in|into|to|in to|inside|at)\\s+(.+)$`).exec(s))) {
+    return { op: 'copy', what: m[1].trim(), from: m[2] || null, to: m[3].trim() }
+  }
   return null
 }
 
@@ -109,6 +114,11 @@ export function plan(text) {
     .replace(/^(?:hey|hi|hello|ok|okay)?\s*(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+/, '')
     .replace(/[.!?]+$/, '')
     .replace(/\b(?:please|can you|could you|for me)\b/g, ' ')
+    // One action, said as two verbs: "cut and paste X into Y" is a move,
+    // "copy and paste X into Y" a copy (heard offline; it used to split at
+    // the "and" into a bare "cut" and fail).
+    .replace(/\b(?:cut|move)\s+(?:and|&|n)\s+paste\b/g, 'move')
+    .replace(/\bcopy\s+(?:and|&|n)\s+paste\b/g, 'copy')
     .replace(/\s+/g, ' ')
     .trim()
   // Separators kept, so a piece that is not a step on its own can be joined
