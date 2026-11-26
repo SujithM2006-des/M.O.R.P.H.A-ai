@@ -65,11 +65,28 @@ Checked live this round:
 - **Gemini app videos:** "Create video" isn't in the Gemini app's menu at
   the moment. Flow is the main path, so this only matters if Flow fails.
 
+## Fourth round (26 Nov)
+
+| # | Problem | Status | How it was checked |
+|---|---|---|---|
+| 25 | Gemini app videos: "Create video" never found | ✅ Fixed — "More tools" now opens on hover, and the old click closed it again | Tested: Jarvis switches Gemini to video mode and sends the request |
+| 26 | When the Gemini app answered with an error, Jarvis waited the full 9 minutes | ✅ Fixed — after Gemini's error reply ("I seem to be encountering an error…") it waits 90 s for a clip, then reports Gemini's words | Both of Gemini's error wordings matched; a normal reply doesn't |
+| 27 | Commit `a46d0dc` on GitHub had another session's message | ✅ Fixed — now `57a2b75` "Fix popup lock-out, browse without the extension, voice by request" (same files). The old history is kept as the branch `backup/before-reword` | Pushed to jarvisv2 |
+
+Checked live this round:
+- **Remaking a clip that fails its check:** a clip deliberately checked
+  against the wrong description failed (3/10, "a sleeping cat instead of a red
+  sports car"); Jarvis remade it with the checker's fix and the remake passed
+  (7/10). About 24 credits.
+- **The Gemini app itself:** it answered both test requests with an error on
+  Google's side, so no Gemini-app clip was made today. Flow, the main path,
+  works.
+
 Still open:
 - **Automatic Groq key setup:** Groq has signed out of Jarvis's Chrome
-  window, so the test waited for an account choice that needs you.
-- **The remake of a clip that fails its check** hasn't run for real (the test
-  clip passed). Forcing it would cost about 24 credits.
+  window. Sign in once (Setup → Groq → Sign in) and it can be tested.
+- **Note on GitHub:** this project pushes to **jarvisv2** (`v2`); `origin`
+  is the older **jarvis_v1**, which was not changed.
 
 ## Worth knowing
 - **Two Claude sessions editing this folder at once** caused the wrong commit

@@ -128,10 +128,17 @@ async function pickCreateVideo(page) {
     try {
       await create.first().waitFor({ state: 'visible', timeout: 10_000 })
     } catch {
+      // "More tools" opens its submenu on hover (Nov 2026); a click shut it
+      // again, so "Create video" was never found. Hover first; click only if
+      // that didn't open it.
       const more = page.getByRole('menuitem', { name: /more tools/i })
       if (await more.count()) {
-        await more.first().click().catch(() => {})
-        await create.first().waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+        await more.first().hover().catch(() => {})
+        const shown = await create.first().waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false)
+        if (!shown) {
+          await more.first().click().catch(() => {})
+          await create.first().waitFor({ state: 'visible', timeout: 4_000 }).catch(() => {})
+        }
       }
     }
     if (await create.count()) {
@@ -219,6 +226,7 @@ async function makeVideo(prompt, aspect, out, onStatus) {
     // still deliver the clip, so only the video — or a clear limit — ends it.
     const t0 = Date.now()
     let limitSince = 0
+    let errorSince = 0
     while (Date.now() - t0 < 9 * 60_000) {
       await page.waitForTimeout(4000)
       const state = await page.evaluate(() => {
@@ -236,6 +244,14 @@ async function makeVideo(prompt, aspect, out, onStatus) {
       if (/(reached|hit|used up|exceeded).{0,40}(limit|quota)|limit.{0,30}(reached|today|tomorrow)|come back (later|tomorrow)|can't (create|generate|make) (more|any more) videos/i.test(state.said)) {
         limitSince ||= Date.now()
         if (Date.now() - limitSince > 20_000) throw new VideoLimitError(`Gemini says: ${state.said.slice(0, 200)}`)
+      }
+      // An error reply ("I encountered an error doing what you asked. Could
+      // you try again?") sometimes still ends in a clip, so give it 90 s —
+      // but no more: it used to wait out all 9 minutes on a request that had
+      // plainly failed.
+      if (/encounter(ed|ing) an error|something went wrong|could you try again|try something else|couldn't (create|generate|make)|can't (create|generate|make) (that|this|the) video/i.test(state.said)) {
+        errorSince ||= Date.now()
+        if (Date.now() - errorSince > 90_000) throw new Error(`Gemini says: ${state.said.slice(-200)}`)
       }
     }
     throw new Error('Gemini took longer than 9 minutes to make the video.')
