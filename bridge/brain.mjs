@@ -14,6 +14,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { installedModels } from './ollama.mjs'
 
 export const OLLAMA_URL = process.env.JARVIS_OLLAMA_URL ?? 'http://127.0.0.1:11434'
 
@@ -91,7 +92,9 @@ async function ollamaModels() {
     const j = await r.json()
     return (j.models ?? []).map((m) => String(m.name))
   } catch {
-    return []
+    // Not running (JARVIS starts it only when the offline model is needed —
+    // bridge/ollama.mjs): what is installed is read from disk instead.
+    return installedModels()
   }
 }
 

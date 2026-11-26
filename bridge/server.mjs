@@ -23,6 +23,7 @@ import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { pcServer, runPcTool } from './pc.mjs'
 import { offlineFileSteps } from './offline-files.mjs'
+import { ollamaIsOurs, startOllama, stopOllama } from './ollama.mjs'
 import { UNDO_RE, lastChange, undoLast } from './undo.mjs'
 import { matchRoutine, routineCommand } from './routines.mjs'
 import { sendScheduled, showWhatsApp, whatsappServer } from './whatsapp.mjs'
@@ -2267,9 +2268,27 @@ async function offlineQuick(text) {
  */
 const IN_FLIGHT = new Map()
 
+// Ollama runs only while the local model is the one answering (or about to):
+// started when it is, stopped a minute after it no longer is — never left
+// running in the background (bridge/ollama.mjs).
+let ollamaIdle = 0
+function tendOllama() {
+  if (currentBrain() === 'local') {
+    ollamaIdle = 0
+    void startOllama()
+  } else if (ollamaIsOurs() && !IN_FLIGHT.size && ++ollamaIdle >= 10) {
+    ollamaIdle = 0
+    stopOllama()
+  }
+}
+tendOllama()
+// With JARVIS: the bridge exiting takes the Ollama it started with it.
+process.on('exit', () => stopOllama())
+
 setInterval(async () => {
   const wasOnline = brainState().online
   await checkBrain()
+  tendOllama()
   const next = currentBrain()
   if (next === activeBrain) return
   // Let a question in progress finish first (checked again in 6 s) — unless
@@ -3168,6 +3187,8 @@ wss.on('connection', (socket) => {
               return
             }
           }
+          // The local model needs its server up (started on demand).
+          if (isLocalBrain() && !(await startOllama())) console.log('[jarvis] Ollama would not start - the local model cannot answer')
           working = true
           IN_FLIGHT.set(turnToken, Date.now())
           if (deliver) {

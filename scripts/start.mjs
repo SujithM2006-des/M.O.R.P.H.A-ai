@@ -10,9 +10,9 @@
  * browser, send things): `npm start -- --writes`.
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import process from 'node:process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -196,6 +196,14 @@ function shutdown(code) {
     } catch {
       /* already gone */
     }
+  }
+  // The Ollama server the bridge started for the offline model goes too: on
+  // Windows a killed bridge does not take its children with it.
+  try {
+    const pid = Number.parseInt(readFileSync(join(homedir(), '.jarvis', 'ollama.pid'), 'utf8'), 10)
+    if (pid) spawnSync('taskkill.exe', ['/T', '/F', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' })
+  } catch {
+    /* none started */
   }
   setTimeout(() => process.exit(code), 300)
 }

@@ -112,6 +112,11 @@ function Stop-Jarvis {
   Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -like '*jarvis-main*popup.ps1*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  # Ollama (the offline model): only for JARVIS, so off with him — its tray
+  # app, its server and any model it has loaded.
+  Get-Process -Name 'ollama app', 'ollama', 'ollama_llama_server' -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path $dir 'ollama.pid') -Force -ErrorAction SilentlyContinue
 }
 
 # Popup mode (~/.jarvis/popup-mode): JARVIS himself starts with the listener,
