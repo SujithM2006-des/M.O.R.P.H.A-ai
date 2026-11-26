@@ -33,7 +33,7 @@ import { naturalSay, naturalVoices, warmNaturalVoices } from './voices.mjs'
 
 // Ready before the first sentence: the helper starts and the list is fetched.
 warmNaturalVoices()
-import { claudeLogin, LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
+import { claudeLogin, readChoice, whyNot, LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
 import { PROXY_URL, proxyIsUp, proxyKey, startProxy } from './litellm.mjs'
 import { newsPrompt, newsServer, startNews } from './news.mjs'
 import { PROMPT_CREATOR, creatorServer } from './creator.mjs'
@@ -2771,8 +2771,13 @@ wss.on('connection', (socket) => {
                   : claudeAuthFailed(msg)
                     ? `${from} isn't signed in, or its subscription has ended`
                     : `${from} isn't working right now`
-                const news =
-                  to && next !== sessionBrain
+                // Picked in the menu (not Auto): stay on it, and say so.
+                const back = restMinutes(msg, limit)
+                const strict = readChoice() !== 'auto'
+                const news = strict
+                  ? `${what} on your current plan${limit ? `; it should be back in about ${back} minute${back === 1 ? '' : 's'}` : ''}. ` +
+                    `You picked ${from}, so I'm staying on it. Ask again later, or pick Auto to let me switch by myself.`
+                  : to && next !== sessionBrain
                     ? `${what}, so I'm switching to ${to}.`
                     : `${what}, and no other model is available right now.`
                 // Long enough to keep the provider's own numbers ("Limit 8000,
@@ -2972,10 +2977,15 @@ wss.on('connection', (socket) => {
       popupState.tool = ''
       // No AI at all: Claude not signed in, no free AI connected, no local
       // model. Say how to fix it instead of failing on a login that isn't there.
-      if (!currentBrain()) {
-        const how = brainState().online
-          ? "I've no AI to think with yet. Claude isn't signed in, and no free AI is connected. Open Customize, then AI accounts, and sign in to Gemini or OpenRouter. They're free and only take a minute."
-          : "The internet is down and there's no local model installed, so I can't think until it's back."
+      // The model picked in the menu can't answer (not signed in, at its limit
+      // …): say why, rather than quietly using a different one.
+      const notNow = whyNot()
+      if (notNow || !currentBrain()) {
+        const how = notNow
+          ? notNow
+          : brainState().online
+            ? "I've no AI to think with yet. Claude isn't signed in, and no free AI is connected. Open Customize, then AI accounts, and sign in to Gemini or OpenRouter. They're free and only take a minute."
+            : "The internet is down and there's no local model installed, so I can't think until it's back."
         popupState.said = how
         send({ type: 'done', text: how, ask: typeof msg.id === 'string' ? msg.id : null, session: sid })
         return

@@ -228,11 +228,50 @@ export function unavailable(id) {
   return ''
 }
 
-/** The provider to use now: the choice if it can answer, else the best that can. */
+/**
+ * The provider to use now.
+ *
+ * A model picked in the menu is used, and only it: Jarvis never swaps it for
+ * another behind the user's back. If it can't answer (not signed in, at its
+ * limit), the question gets a plain answer saying so — see whyNot(). Auto is
+ * the one that switches: the best that can answer right now.
+ */
 export function currentBrain() {
   const choice = readChoice()
-  if (choice !== 'auto' && !unavailable(choice) && !isExhausted(choice)) return choice
+  if (choice !== 'auto') return choice
   return ORDER.find((id) => !unavailable(id) && !isExhausted(id)) ?? ORDER.find((id) => !unavailable(id)) ?? null
+}
+
+/** Minutes until a provider rested after a limit can be asked again (0 if it can). */
+export function restingFor(id) {
+  return Math.max(0, Math.ceil(((exhausted.get(id) ?? 0) - Date.now()) / 60_000))
+}
+
+/**
+ * Why the model picked in the menu can't answer right now, in words for the
+ * user — or "" if it can (or the menu is on Auto, which always finds one).
+ */
+export function whyNot() {
+  const id = readChoice()
+  if (id === 'auto') return ''
+  const label = PROVIDERS[id]?.label ?? id
+  const why = unavailable(id)
+  const tail = ' Pick another model beside the text box, or Auto to let me switch by myself.'
+  if (why === 'not signed in' || why === 'sign in again') {
+    return (
+      `You've picked Claude, but Claude isn't available on your current plan: it needs a Claude Pro or Max ` +
+      `plan signed in to Claude Code (the free Claude plan can't be used this way).` + tail
+    )
+  }
+  if (why === 'not connected') return `You've picked ${label}, but it isn't connected yet — sign in to it in Customize, AI accounts.` + tail
+  if (why === 'not installed') return `You've picked the local model, but none is installed on this PC.` + tail
+  if (why === 'offline') return `You've picked ${label}, but the internet is down.` + tail
+  if (why === 'starting') return `${label} is still starting up — ask again in a few seconds.`
+  const wait = restingFor(id)
+  if (wait) {
+    return `${label}'s limit on your current plan is reached; it should be back in about ${wait} minute${wait === 1 ? '' : 's'}.` + tail
+  }
+  return ''
 }
 
 /** Everything the dropdown shows. */
