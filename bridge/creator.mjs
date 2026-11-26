@@ -981,7 +981,7 @@ export function creatorServer() {
             if (planErr instanceof VideoLimitError) {
               return failText(`${planErr.message} I can make it as pictures with motion instead (make_reel, motion "still").`)
             }
-            return failText(`Couldn't make the AI video with Google Flow: ${String(planErr.message).split('\n')[0]}`)
+            return failText(`Couldn't make the AI video. ${String(planErr.message).split('\n')[0]}`)
           }
           const key = geminiKey()
           try {
@@ -1194,7 +1194,7 @@ export function creatorServer() {
         async () => {
           const c = await flowCredits()
           return c
-            ? text(`${c.credits} Google Flow credits left (about ${Math.floor(c.credits / 12)} AI clips), resetting ${c.resets}. The Gemini app also gives a couple of free videos a day.`)
+            ? text(`${c.credits} Google Flow credits left (about ${Math.floor(c.credits / 12)} AI clips)${c.resets ? `, resetting ${c.resets}` : ''}. The Gemini app also gives a couple of free videos a day.`)
             : failText("Couldn't read the Flow credits (the Gemini window isn't open or isn't signed in).")
         },
       ),

@@ -45,6 +45,32 @@ Checked and **not bugs** (earlier report was wrong):
 - **The page after the bridge restarts**: it reconnects by itself, and the
   next question is answered normally.
 
+## Third round (26 Nov)
+
+| # | Problem | Status | How it was checked |
+|---|---|---|---|
+| 19 | A question typed while the bridge was down was lost | ✅ Fixed — it goes back into the text box; Enter retries it | Tested with the bridge stopped |
+| 20 | The Agent timeline said "Done" after a failed request | ✅ Fixed — a red "Failed" step | Tested |
+| 21 | Reminders, "Hey Jarvis", the popup mic and circle-to-search went to every open window (spoken or answered twice) | ✅ Fixed — sent to one window (the newest); mute still goes to all | Tested: a reminder with two windows open reached one |
+| 22 | Flow credits showed nothing after Flow's redesign (the reset date is gone from its menu) | ✅ Fixed — reads "250 Google Flow credits" | Tested |
+| 23 | When Flow and the Gemini app both failed, the message said "with Google Flow" but gave only Gemini's reason | ✅ Fixed — both reasons | Code |
+| 24 | A Flow failure said only "Timeout 15000ms exceeded" | ✅ Fixed — names the step ("typing the prompt" …); notices are cleared again just before typing | Code |
+
+Checked live this round:
+- **The LiteLLM slow-start fix:** forced the slow path; LiteLLM came up 28 s
+  later and the models were enabled.
+- **A real AI video:** Flow made a 4-second 720×1280 clip with sound in
+  102 s; Gemini watched it and scored it 10/10 (on its backup model, since
+  the first was busy). About 12 credits.
+- **Gemini app videos:** "Create video" isn't in the Gemini app's menu at
+  the moment. Flow is the main path, so this only matters if Flow fails.
+
+Still open:
+- **Automatic Groq key setup:** Groq has signed out of Jarvis's Chrome
+  window, so the test waited for an account choice that needs you.
+- **The remake of a clip that fails its check** hasn't run for real (the test
+  clip passed). Forcing it would cost about 24 credits.
+
 ## Worth knowing
 - **Two Claude sessions editing this folder at once** caused the wrong commit
   message on `a46d0dc`. Use one session at a time.

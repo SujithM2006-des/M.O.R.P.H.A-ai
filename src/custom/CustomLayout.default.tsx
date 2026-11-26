@@ -807,7 +807,7 @@ function ChatView({ title, assistant, onClose }: { title: string; assistant: str
 }
 
 /** One step of what he is doing for the current request. */
-type Step = { id: number; label: string; kind: 'listen' | 'think' | 'tool' | 'speak' | 'done'; at: string }
+type Step = { id: number; label: string; kind: 'listen' | 'think' | 'tool' | 'speak' | 'done'; at: string; failed?: boolean }
 
 const toolLabel = (t: string) => t.replace(/^mcp__[^_]+(_[^_]+)*__/, '').replace(/[_-]+/g, ' ').trim()
 
@@ -820,7 +820,7 @@ function AgentTrace({ steps }: { steps: Step[] }) {
       {steps.map((s, i) => (
         <Fragment key={s.id}>
           {i > 0 && <span className="vg-trace-arrow">›</span>}
-          <span className={`vg-step vg-step-${s.kind} ${i === steps.length - 1 && s.kind !== 'done' ? 'vg-step-live' : ''}`}>
+          <span className={`vg-step vg-step-${s.kind} ${s.failed ? 'vg-step-fail' : ''} ${i === steps.length - 1 && s.kind !== 'done' ? 'vg-step-live' : ''}`}>
             <i />
             {s.label}
             <small>{s.at}</small>
@@ -1261,6 +1261,16 @@ function AskBar() {
   const muted = useMuted()
   const [text, setText] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
+  // A typed request that failed (the bridge down, say) comes back here, unless
+  // something new has been typed meanwhile.
+  useEffect(() => {
+    const f = (e: Event) => {
+      const back = String((e as CustomEvent).detail ?? '')
+      setText((t) => (t.trim() ? t : back))
+    }
+    window.addEventListener('jarvis-restore-ask', f)
+    return () => window.removeEventListener('jarvis-restore-ask', f)
+  }, [])
   const inChat = useChat()
   const listening = !muted && (phase === 'listening' || phase === 'waking')
   const send = () => {
@@ -1423,7 +1433,7 @@ export default function CustomLayout() {
   const now = useNow(1000)
   const s = useStatus()
   const bridgeUp = useBridgeUp()
-  const { phase, level, caption, activeTool } = useJarvis()
+  const { phase, level, caption, activeTool, error } = useJarvis()
   const muted = useMuted()
   const [nav, setNav] = useState('home')
   // Their name from JARVIS's memory; "sir" until he knows it.
@@ -1435,7 +1445,17 @@ export default function CustomLayout() {
   useEffect(() => {
     const at = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' }).replace(/\s?[AP]M$/, '')
     if (phase === 'dormant') {
-      setTrace((t) => (t.length && t[t.length - 1].kind !== 'done' ? [...t, { id: ++stepId.current, label: 'Done', kind: 'done', at }] : t))
+      // "Failed" when the request ended in an error: it said "Done" even when
+      // nothing was answered (the bridge down, say).
+      const end = error ? { label: 'Failed', failed: true } : { label: 'Done', failed: false }
+      setTrace((t) => {
+        const last = t[t.length - 1]
+        if (!t.length) return t
+        if (last.kind !== 'done') return [...t, { id: ++stepId.current, ...end, kind: 'done', at }]
+        // The error arrived just after: correct the step already drawn.
+        if (error && !last.failed) return [...t.slice(0, -1), { ...last, ...end }]
+        return t
+      })
       return
     }
     const step: Pick<Step, 'label' | 'kind'> | null =
@@ -1455,7 +1475,7 @@ export default function CustomLayout() {
       const base = step.kind === 'listen' && (!t.length || t[t.length - 1].kind === 'done') ? [] : t
       return [...base, { id: ++stepId.current, ...step, at }].slice(-7)
     })
-  }, [phase, activeTool])
+  }, [phase, activeTool, error])
 
   const hm = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).split(' ')[0]
   const ampm = now.getHours() < 12 ? 'AM' : 'PM'

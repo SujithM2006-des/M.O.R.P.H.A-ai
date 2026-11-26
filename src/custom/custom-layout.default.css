@@ -1685,6 +1685,9 @@ body {
 .vg-step-tool > i { background: #7fd0ff; }
 .vg-step-speak > i { background: #7fd0ff; }
 .vg-step-done > i { background: #5fe3a1; }
+/* The request ended in an error. */
+.vg-step-fail { color: #ffb4a8; }
+.vg-step-done.vg-step-fail > i { background: #ff6b6b; }
 .vg-step-live {
   color: #fff;
   border-color: var(--edge-hi);

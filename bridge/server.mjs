@@ -309,7 +309,7 @@ function startCircle() {
     const path = out.trim()
     if (!path || !existsSync(path)) return console.log('[jarvis] circle to search: cancelled')
     console.log(`[jarvis] circle to search: ${path}`)
-    broadcast({ type: 'circle', path })
+    askOne({ type: 'circle', path })
   })
   return true
 }
@@ -347,16 +347,16 @@ import { journalPrompt, record as recordExchange } from './journal.mjs'
 import { composeWithAttachments, prepareAttachments, tidyAttached } from './attachments.mjs'
 import { customizeServer } from './customize.mjs'
 
-/**
- * Every open Jarvis window, so something Jarvis says on his own — a reminder
- * falling due — is spoken wherever the user is listening.
- */
+/** Every open Jarvis window. */
 const CLIENTS = new Set()
+/**
+ * Something Jarvis says on his own — a reminder falling due — spoken by one
+ * window (the newest). Sent to all of them, each said it: with two windows
+ * open, every reminder was spoken twice.
+ */
 const announce = (text) => {
   console.log(`[jarvis] announce: ${text}`)
-  for (const ws of CLIENTS) {
-    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'announce', text }))
-  }
+  askOne({ type: 'announce', text })
 }
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -1495,13 +1495,9 @@ const handleRequest = async (req, res) => {
     return res.end()
   }
   if (req.method === 'POST' && req.url === '/wake') {
-    let sent = 0
-    for (const ws of CLIENTS) {
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: 'wake' }))
-        sent++
-      }
-    }
+    // One window listens: woken in every window, each heard the request and
+    // answered it.
+    const sent = askOne({ type: 'wake' })
     console.log(`[jarvis] wake word (background listener) -> ${sent} window(s)`)
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
     return res.end(JSON.stringify({ clients: sent }))
@@ -1575,7 +1571,7 @@ const handleRequest = async (req, res) => {
       res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
       return res.end(JSON.stringify({ sent: 0, offline: true }))
     }
-    const sent = broadcast({ type: 'mic' })
+    const sent = askOne({ type: 'mic' })
     if (!sent && popupMode()) {
       startWindow()
       res.writeHead(202, { ...cors, 'content-type': 'application/json; charset=utf-8' })

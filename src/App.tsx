@@ -356,6 +356,9 @@ export default function App() {
       }
       sfx.play('error')
       store.getState().setError(why)
+      // Typed and not answered: put it back in the text box, so a retry is
+      // one Enter away instead of typing it all again.
+      if (typed) window.dispatchEvent(new CustomEvent('jarvis-restore-ask', { detail: said }))
     } finally {
       if (!gone()) store.getState().setSessionBusy(sid, false)
       if (!stale()) {

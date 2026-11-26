@@ -277,10 +277,13 @@ async function clearFlowOverlays(page) {
 
 /** One-off notices ("Introducing ..." then Get started). */
 async function dismissFlowNotices(page) {
-  for (const name of ['Get started', 'Got it', 'Dismiss']) {
+  for (const name of ['Get started', 'Got it', 'Dismiss', 'No thanks', 'Not now']) {
     const b = page.getByRole('button', { name, exact: true })
     if (await b.count()) await b.first().click({ timeout: 3000 }).catch(() => {})
   }
+  // Newer banners ("Introducing Gemini Omni …", Nov 2026) close with an ×.
+  const close = page.locator('[role="dialog"] button[aria-label*="close" i], [role="dialog"] button:has-text("close")')
+  if (await close.count()) await close.first().click({ timeout: 3000 }).catch(() => {})
 }
 
 /** JARVIS's Flow project, open in a new tab (made the first time). */
@@ -342,12 +345,17 @@ async function makeFlowVideo(prompt, aspect, out, characters = []) {
   await ensureChrome()
   const b = await connect()
   let page
+  // Which step is running, so a failure says where ("Flow: couldn't do
+  // 'typing the prompt'") instead of a bare "Timeout 15000ms exceeded".
+  let step = 'opening the project'
   try {
     const ctx = b.contexts()[0]
     const p = await openFlowProject(ctx)
     page = p.page
+    step = 'setting up the project'
     await configureFlow(page, p.state, aspect)
     await clearFlowOverlays(page)
+    step = 'reading the existing videos'
 
     // The grid fills in gradually: wait until it stops growing before noting
     // which videos are already there, or an old one appearing late looks new.
@@ -370,12 +378,19 @@ async function makeFlowVideo(prompt, aspect, out, characters = []) {
     // The scene's characters go into the prompt first, so Flow draws them as
     // made; those kept in words (children) are described in the prompt itself.
     const { attach, written } = castFor(characters)
+    step = 'attaching the characters'
     if (attach.length) await attachCharacters(page, attach)
     const looks = written.map((c) => `${c.name} looks exactly like this in every shot: ${c.description}.`).join(' ')
+    step = 'typing the prompt'
+    // Notices and menus can come up while the page settles: clear them again.
+    await dismissFlowNotices(page)
+    await clearFlowOverlays(page)
     const box = page.locator('[role="textbox"][aria-label="What do you want to create?"]')
     await box.first().click({ timeout: 15_000 })
     await page.keyboard.type(`Create a video: ${`${prompt} ${looks}`.replace(/\s+/g, ' ').trim().slice(0, 2500)}`)
+    step = 'starting the generation'
     await page.getByRole('button', { name: 'Start generation' }).click({ timeout: 10_000 })
+    step = 'waiting for the video'
 
     const t0 = Date.now()
     let saidSince = 0
@@ -410,6 +425,9 @@ async function makeFlowVideo(prompt, aspect, out, characters = []) {
       }
     }
     throw new Error('Flow took longer than 12 minutes to make the video.')
+  } catch (err) {
+    if (err instanceof VideoLimitError || !/Timeout|locator|waiting for/i.test(String(err?.message))) throw err
+    throw new Error(`Flow: couldn't do "${step}" (the page didn't respond as expected — Flow may have changed).`)
   } finally {
     await page?.close().catch(() => {})
     await b.close().catch(() => {})
@@ -428,8 +446,13 @@ export async function flowCredits() {
     await page.locator('[aria-label="Account details"]').first().click({ timeout: 8000 })
     await page.waitForTimeout(2000)
     const t = await page.evaluate(() => document.body.innerText)
-    const m = /(\d[\d,]*)\s+Google Flow credits[\s\S]{0,40}?Resets\s+([^\n]+)/i.exec(t)
-    return m ? { credits: Number(m[1].replace(/,/g, '')), resets: m[2].trim() } : null
+    // The reset date is optional: Flow's redesigned menu (Nov 2026) shows
+    // only "250 Google Flow credits", and requiring it made this return
+    // nothing, so Jarvis couldn't tell how many credits were left.
+    const m = /(\d[\d,]*)\s+Google Flow credits/i.exec(t)
+    if (!m) return null
+    const reset = /Google Flow credits[\s\S]{0,40}?Resets\s+([^\n]+)/i.exec(t)
+    return { credits: Number(m[1].replace(/,/g, '')), resets: reset ? reset[1].trim() : null }
   } catch {
     return null
   } finally {
@@ -464,8 +487,10 @@ export async function planVideo(prompt, { aspect = '9:16', out, characters = [] 
     if (err instanceof VideoLimitError && flowErr instanceof VideoLimitError) {
       throw new VideoLimitError("Google Flow's credits and the Gemini app's daily videos are both used up.")
     }
-    // Report Flow's problem: it is the one the user relies on.
-    throw err instanceof VideoLimitError ? flowErr : err
+    // Both reasons: it used to say "Couldn't make it with Google Flow" and
+    // then give only the Gemini app's reason, hiding what went wrong in Flow.
+    const first = (e) => String(e?.message ?? e).split('\n')[0]
+    throw new Error(`Google Flow: ${first(flowErr)} The Gemini app as a backup: ${first(err)}`)
   }
 }
 
