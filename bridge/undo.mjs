@@ -66,6 +66,37 @@ const recycle = (path) =>
     )
   })
 
+/**
+ * Bring a recycled file or folder back to where it was. Windows keeps each
+ * deleted item's original folder (the Recycle Bin's "Original Location"
+ * column) and the item itself as $R…; moving that back, and removing its $I…
+ * record, is what Explorer's Restore does. Resolves true if it was restored.
+ */
+const restoreFromBin = (path) =>
+  new Promise((resolve) => {
+    const cmd = `
+$want = $env:JARVIS_S
+$dir = Split-Path -Parent $want
+$name = Split-Path -Leaf $want
+$stem = [IO.Path]::GetFileNameWithoutExtension($name)
+$rb = (New-Object -ComObject Shell.Application).Namespace(10)
+$hit = $null
+foreach ($i in $rb.Items()) {
+  if ($rb.GetDetailsOf($i, 1) -ieq $dir -and ($i.Name -ieq $name -or $i.Name -ieq $stem)) { $hit = $i }
+}
+if (-not $hit) { 'none'; exit }
+Move-Item -LiteralPath $hit.Path -Destination $want -ErrorAction Stop
+$rec = $hit.Path -replace '\\\\\\$R([^\\\\]+)$', '\\$I$1'
+if ($rec -ne $hit.Path) { Remove-Item -LiteralPath $rec -Force -ErrorAction SilentlyContinue }
+'ok'`
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', cmd],
+      { env: { ...process.env, JARVIS_S: path }, windowsHide: true, timeout: 60_000 },
+      (err, out) => resolve(!err && String(out).trim().endsWith('ok')),
+    )
+  })
+
 function moveBack(from, to) {
   mkdirSync(dirname(from), { recursive: true })
   try {
@@ -112,7 +143,9 @@ export async function undoLast() {
           }
         }
       } else if (s.op === 'recycle') {
-        couldnt.push(`${basename(s.from)} is in the Recycle Bin — open it and choose Restore to put it back`)
+        if (existsSync(s.from)) couldnt.push(`something called ${basename(s.from)} is already back in its place`)
+        else if (await restoreFromBin(s.from)) did.push(`brought ${basename(s.from)} back from the Recycle Bin`)
+        else couldnt.push(`${basename(s.from)} isn't in the Recycle Bin any more (emptied?) — I couldn't bring it back`)
       }
     } catch (err) {
       couldnt.push(`${basename(s.to || s.from || '')}: ${err.message}`)

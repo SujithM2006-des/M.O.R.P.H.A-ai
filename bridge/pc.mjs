@@ -775,7 +775,7 @@ $rows | Sort-Object mb -Descending | ForEach-Object {
       'undo_last_change',
       'Undo the last file change JARVIS made (a move, copy, rename or new folder — by voice, typed or by ' +
         'you): moves it back, recycles the copy, removes the empty folder. Use when the user says undo, ' +
-        'put it back, that was wrong, etc. Something sent to the Recycle Bin can only be restored from there.',
+        'put it back, that was wrong, etc. Something it sent to the Recycle Bin is brought back from there.',
       {},
       async () => {
         try {
