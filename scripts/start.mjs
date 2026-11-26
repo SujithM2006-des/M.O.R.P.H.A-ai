@@ -136,6 +136,10 @@ function run(name, command, args, colour, env, { restart = false } = {}) {
       env: { ...process.env, ...env },
       shell: false,
     })
+    // Decoded as UTF-8 across chunks: a character split between two chunks
+    // (Tamil, "—") was otherwise turned into garbage in the console and log.
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
     child.stdout.on('data', (d) => process.stdout.write(label(d) + '\n'))
     child.stderr.on('data', (d) => process.stderr.write(label(d) + '\n'))
     child.on('exit', (code) => {

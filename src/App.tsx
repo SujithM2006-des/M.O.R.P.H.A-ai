@@ -239,6 +239,9 @@ export default function App() {
     s.clearPanels()
     s.clearBlades()
     s.setCaption('')
+    // A new request: the last one's error (say, "Cannot reach the bridge"
+    // while it was restarting) stayed on screen under the next good answer.
+    s.setError(null)
     if (!again) s.pushTurn({ id: newId(), role: 'user', text: said }, sid)
     /**
      * The chat view: the answer is read on screen, so the model is told to
@@ -794,6 +797,14 @@ export default function App() {
       void respond(text, true)
     }
     watchPopupAsk(fromDesk)
+    // This window's own text box (kit.ts ask): answered here, and only here.
+    // False while he hasn't started, so it goes the long way (the bridge).
+    ;(window as unknown as { __jarvisAsk?: (text: string) => boolean }).__jarvisAsk = (text: string) => {
+      const phase = store.getState().phase
+      if (phase === 'offline' || phase === 'boot') return false
+      fromDesk(text)
+      return true
+    }
 
     // The popup's mic button: a toggle. Listening already → standby;
     // otherwise listen now, cutting through anything he is saying or doing.

@@ -54,6 +54,21 @@ function rampTo(param: AudioParam, to: number, seconds: number) {
 }
 
 /**
+ * The first click or key anywhere turns the sound on. Starting by himself
+ * (autostart, in an ordinary browser), power-up waits in unlockAudio for the
+ * sound, and the browser holds that until the page is clicked — but a click
+ * only counts if something asks for sound inside it. Without this, clicking
+ * the page did nothing and he stayed at "Tap to start" for good.
+ */
+if (typeof window !== 'undefined') {
+  const wake = () => {
+    if (ctx?.state === 'suspended') void ctx.resume().catch(() => {})
+  }
+  window.addEventListener('pointerdown', wake, { capture: true })
+  window.addEventListener('keydown', wake, { capture: true })
+}
+
+/**
  * Browsers won't start audio until the user has interacted with the page, so
  * this has to be called from a click or keypress.
  */

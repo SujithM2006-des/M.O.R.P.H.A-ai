@@ -188,6 +188,17 @@ const broadcast = (msg) => {
   for (const ws of CLIENTS) if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
   return CLIENTS.size
 }
+/**
+ * A request for one window to answer (typed in the popup, a routine): the
+ * newest open window. Sent to all of them, each answered it — with two open,
+ * Claude was asked twice.
+ */
+const askOne = (msg) => {
+  const open = [...CLIENTS].filter((ws) => ws.readyState === ws.OPEN)
+  const ws = open[open.length - 1]
+  if (ws) ws.send(JSON.stringify(msg))
+  return ws ? 1 : 0
+}
 
 let popupProc = null
 const PS_ARGS = ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File']
@@ -1526,7 +1537,7 @@ const handleRequest = async (req, res) => {
         (att.problems.length ? ` (problems: ${att.problems.join('; ')})` : ''))
       text = composeWithAttachments(text, att)
     }
-    const sent = text ? broadcast({ type: 'popup-ask', text }) : 0
+    const sent = text ? askOne({ type: 'popup-ask', text }) : 0
     if (!sent && text && popupMode()) {
       startWindow(text)
       res.writeHead(202, { ...cors, 'content-type': 'application/json' })
@@ -2004,7 +2015,7 @@ void startProxy()
 startNews(() => brainState().online)
 // Routines: at their time, asked of the window as if typed in the popup.
 // Only while a window is open (true when one took it).
-startRoutines((request) => broadcast({ type: 'popup-ask', text: request }) > 0)
+startRoutines((request) => askOne({ type: 'popup-ask', text: request }) > 0)
 let activeBrain = currentBrain()
 console.log(`[jarvis] brain: ${activeBrain ?? 'none'}${activeBrain === 'local' ? ` (${brainState().model})` : ''}`)
 let brainNews = null
@@ -2053,7 +2064,13 @@ const LIGHT_SERVERS = ['jarvis_assistant', 'jarvis_news']
 /** The session's options for the brain in use. */
 function withBrain(o) {
   const id = currentBrain()
-  if (!id || id === 'claude') return o
+  // Claude: tool search on. Every request used to carry all ~120 tool
+  // descriptions (about 14,000 of its ~43,000 tokens), and a question that
+  // used two tools paid for them three times. Now only the always-loaded
+  // groups (the display, and reminders/time/memory) are sent; the rest are
+  // found by name when a question needs them. Claude only: LiteLLM cannot
+  // pass deferred tools to the other providers.
+  if (!id || id === 'claude') return { ...o, env: { ...process.env, ...(o.env ?? {}), ENABLE_TOOL_SEARCH: 'true' } }
   if (id === 'local') {
     const keep = ['jarvis_pc', 'jarvis_assistant', 'jarvis_news']
     const local = {

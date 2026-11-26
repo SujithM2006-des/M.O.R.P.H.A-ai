@@ -98,11 +98,13 @@ export const PROVIDERS = {
   local: { label: 'Local', needs: 'ollama' },
 }
 /**
- * Best first: the order Auto tries them in. Fastest measured first after
- * Claude: OpenRouter (free Nemotron) answered with a tool in 4.5 s, Gemini in
- * 38 s while Google's free tier was busy. Groq is known for speed.
+ * Best first: the order Auto tries them in. After Claude, the ones that can
+ * use every tool: OpenRouter (free Nemotron) answered with a tool in 4.5 s,
+ * Gemini in 38 s while Google's free tier was busy. Groq last before the
+ * local model: its free plan fits about one question a minute, so it runs
+ * light (a few tools only; see LIGHT_SERVERS in server.mjs).
  */
-export const ORDER = ['claude', 'groq', 'openrouter', 'gemini', 'local']
+export const ORDER = ['claude', 'openrouter', 'gemini', 'groq', 'local']
 
 const KEYS_FILE = join(homedir(), '.jarvis', 'keys.json')
 const CHOICE_FILE = join(homedir(), '.jarvis', 'brain-choice')
@@ -179,10 +181,12 @@ export function setProxyCheck(fn) {
 export function unavailable(id) {
   const p = PROVIDERS[id]
   if (!p) return 'unknown'
-  if (p.needs === 'ollama') return state.model ? '' : 'no local model installed'
+  // Short: shown after the name in the model menu ("Groq · resting"), and a
+  // long reason was cut off there.
+  if (p.needs === 'ollama') return state.model ? '' : 'not installed'
   if (!state.online) return 'offline'
   if (p.needs === 'key') {
-    if (!readKeys()[id]?.key) return 'no API key — add one in Customize'
+    if (!readKeys()[id]?.key) return 'not connected'
     if (!proxyUp()) return 'starting'
   }
   return ''
@@ -205,7 +209,7 @@ export function brainsInfo() {
     options: ORDER.map((id) => ({
       id,
       label: PROVIDERS[id].label,
-      unavailable: unavailable(id) || (isExhausted(id) ? 'limit reached — resting' : ''),
+      unavailable: unavailable(id) || (isExhausted(id) ? 'resting' : ''),
     })),
   }
 }

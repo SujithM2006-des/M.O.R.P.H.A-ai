@@ -318,7 +318,10 @@ let weatherCache = { at: 0, data: null }
 
 /** Structured weather for the HUD, cached for fifteen minutes. */
 export async function weatherData() {
-  if (weatherCache.data && Date.now() - weatherCache.at < 15 * 60_000) return weatherCache.data
+  // 15 minutes for a reading at the PC's own location; 2 for a fallback
+  // (Windows location didn't answer), so the real place takes over soon.
+  const keep = weatherCache.precise ? 15 * 60_000 : 2 * 60_000
+  if (weatherCache.data && Date.now() - weatherCache.at < keep) return weatherCache.data
   const raw = await weatherRaw(null)
   const data = {
     city: raw.place.name,
@@ -331,7 +334,7 @@ export async function weatherData() {
     lo: Math.round(raw.w.daily.temperature_2m_min[0]),
     rain: raw.w.daily.precipitation_probability_max[0],
   }
-  weatherCache = { at: Date.now(), data }
+  weatherCache = { at: Date.now(), data, precise: Boolean(raw.precise) }
   return data
 }
 
@@ -367,14 +370,20 @@ export async function preciseLocation() {
   const json = await ps(
     'Add-Type -AssemblyName System.Device; ' +
       '$w = New-Object System.Device.Location.GeoCoordinateWatcher([System.Device.Location.GeoPositionAccuracy]::High); ' +
-      "$w.Start(); $t = 0; while ($w.Status -ne 'Ready' -and $w.Permission -ne 'Denied' -and $t -lt 100) { Start-Sleep -Milliseconds 100; $t++ }; " +
+      // Up to 20 s: a cold start of Windows location took longer than the
+      // old 10 s, and the weather then fell back to another town.
+      "$w.Start(); $t = 0; while ($w.Status -ne 'Ready' -and $w.Permission -ne 'Denied' -and $t -lt 200) { Start-Sleep -Milliseconds 100; $t++ }; " +
       '$c = $w.Position.Location; $w.Stop(); ' +
       "if ($c.IsUnknown) { 'null' } else { [pscustomobject]@{ lat = $c.Latitude; lon = $c.Longitude; acc = $c.HorizontalAccuracy } | ConvertTo-Json -Compress }",
     {},
-    20_000,
+    30_000,
   )
   const pos = JSON.parse(json || 'null')
-  if (!pos || !Number.isFinite(pos.lat)) return null
+  // Windows didn't answer this time (it sometimes doesn't within 10 s): the
+  // last place it gave, if recent, rather than jumping to another town.
+  if (!pos || !Number.isFinite(pos.lat)) {
+    return locationCache.data && Date.now() - locationCache.at < 12 * 3600_000 ? locationCache.data : null
+  }
   let name = ''
   let city = ''
   let region = ''
@@ -412,13 +421,23 @@ async function weatherRaw(city) {
     place = g.results?.[0]
     if (!place) throw new Error(`No place called ${city} was found.`)
   } else {
-    // Where they actually are: Windows location (Wi-Fi/GPS), then a city
-    // they told him to remember, then — last — the internet provider's
-    // rough guess, which is often a city or more away.
+    // Where they actually are: Windows location (Wi-Fi/GPS), then the city
+    // set in setup ("for weather when location is off" — it used to be
+    // ignored, so the panel jumped between their town and the internet
+    // provider's guess), then a city they told him to remember, then — last —
+    // the provider's rough guess, which is often a city or more away.
     const here = await preciseLocation().catch(() => null)
+    const setupCity = here ? '' : String(readProfile().city ?? '').trim()
+    if (setupCity) {
+      try {
+        return await weatherRaw(setupCity)
+      } catch {
+        /* a name the weather service doesn't know: carry on below */
+      }
+    }
     const remembered = here ? null : rememberedCity()
     if (here) {
-      place = { name: here.name, latitude: here.lat, longitude: here.lon, admin1: here.region }
+      place = { name: here.name, latitude: here.lat, longitude: here.lon, admin1: here.region, precise: true }
     } else if (remembered) {
       return weatherRaw(remembered)
     } else {
@@ -433,7 +452,7 @@ async function weatherRaw(city) {
       '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=2&timezone=auto',
   )).json()
   if (!w?.current) throw new Error('the weather service did not answer')
-  return { place, w }
+  return { place, w, precise: place.precise === true }
 }
 
 // ---------------------------------------------------------------------------

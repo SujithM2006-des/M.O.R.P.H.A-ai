@@ -243,7 +243,8 @@ body {
 .vg-pill-speaking { color: #cde9ff; border-color: rgba(120, 190, 255, 0.5); background: rgba(30, 80, 170, 0.32); }
 .vg-pill-thinking { color: #cde9ff; border-color: rgba(120, 190, 255, 0.5); background: rgba(30, 80, 170, 0.32); }
 .vg-pill-tooling { color: #cde9ff; border-color: rgba(120, 190, 255, 0.5); background: rgba(30, 80, 170, 0.32); }
-.vg-pill-offline { color: #ffa0a0; border-color: rgba(255, 110, 110, 0.45); background: rgba(110, 20, 20, 0.35); }
+/* Not started yet (waiting for a first click): amber, not an error red. */
+.vg-pill-offline { color: #ffd38a; border-color: rgba(255, 190, 90, 0.5); background: rgba(110, 70, 10, 0.32); }
 .vg-pill-muted {
   color: #ffb0b0 !important;
   border: 1px solid rgba(255, 100, 110, 0.55) !important;
@@ -452,6 +453,9 @@ body {
   margin-right: 5px;
   animation: vg-blink 1.4s ease-in-out infinite;
 }
+/* The bridge has stopped answering: the readings are the last ones it gave. */
+.vg-live.vg-stale { color: #ffb4a8; }
+.vg-live.vg-stale::before { animation: none; }
 .vg-track {
   position: relative;
   display: block;
@@ -846,7 +850,8 @@ body {
   font: 600 clamp(13px, 1.9vh, 16px) 'Inter', sans-serif;
 }
 .vg-gauge b small {
-  font-size: 0.65em;
+  /* Never under 10 px (it was 9.9 px at phone width). */
+  font-size: max(10px, 0.65em);
   color: var(--ink-3);
 }
 .vg-gauge > span {
@@ -1120,7 +1125,7 @@ body {
   padding: 0 6px;
   border-radius: 5px;
   font-style: normal;
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #4ee6a8;
@@ -1634,6 +1639,8 @@ body {
 .vg-sc.vg-ok > i { background: #5fe3a1; box-shadow: 0 0 8px #5fe3a1; animation: vg-blink 2.4s ease-in-out infinite; }
 .vg-sc.vg-bad { color: #ffaaaa; border-color: rgba(255, 110, 110, 0.4); }
 .vg-sc.vg-bad > i { background: #ff6b6b; box-shadow: 0 0 8px #ff6b6b; }
+.vg-sc.vg-wait { color: #ffd38a; border-color: rgba(255, 190, 90, 0.45); }
+.vg-sc.vg-wait > i { background: #ffb547; box-shadow: 0 0 8px #ffb547; }
 
 /* Centre: reactor, then the agent trace, then the conversation. */
 .vg-centre { grid-template-rows: minmax(0, 1fr) auto auto; }
@@ -1963,7 +1970,9 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
      layout lets these shrink to fit, which here squashed the centre to nothing. */
   .vg-centre { grid-column: 2 / -1; grid-row: 2; grid-template-rows: auto auto auto; min-height: min-content; }
   .vg-col, .vg-ask { min-height: min-content; }
-  .vg-reactor { height: min(46vh, 62vw); max-height: none; margin-top: 2vh; margin-bottom: 11%; }
+  /* Smaller than full screen, so the suggestions under it fit above the ask
+     bar (pinned to the bottom, it covered seven of them at 1024 × 760). */
+  .vg-reactor { height: min(38vh, 52vw); max-height: none; margin-top: 1vh; margin-bottom: 6%; }
   .vg-ask {
     grid-column: 2 / -1;
     grid-row: 3;
@@ -1980,6 +1989,29 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
   .vg-head-mid .vg-hm-line { display: none; }
 }
 
+/* "Sessions, usage & more ↓": only drawn in a narrow window, at the top.
+   Under .vg-root so the layout's general button reset does not strip it. */
+.vg-root .vg-panels-hint {
+  position: fixed;
+  right: 18px;
+  bottom: 92px;
+  z-index: 8;
+  pointer-events: auto;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 182, 255, 0.55);
+  background: rgba(6, 24, 52, 0.92);
+  color: #cfe6fb;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 12px rgba(63, 182, 255, 0.25);
+  animation: vg-hint-bob 2.4s ease-in-out infinite;
+}
+.vg-root .vg-panels-hint:hover { border-color: #3fb6ff; color: #fff; }
+@keyframes vg-hint-bob { 50% { transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) { .vg-root .vg-panels-hint { animation: none; } }
+
 /* Header: the status chips go first when space runs out, then the date. */
 @media (max-width: 900px) {
   .vg-head-mid { display: none; }
@@ -1992,6 +2024,11 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
 /* Narrow (a quarter of the screen, or a phone-sized window): one column.
    The rail becomes a row of icons under the header. */
 @media (max-width: 680px) {
+  /* The orb's spinning ring of text reached 8 px past the window's edge. */
+  .vg-centre { overflow-x: clip; }
+  /* One column: the panels follow straight after the ask bar, and the hint
+     sat on top of the text box and the mic button here. */
+  .vg-root .vg-panels-hint { display: none; }
   .vg-root {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto max-content max-content max-content max-content max-content;

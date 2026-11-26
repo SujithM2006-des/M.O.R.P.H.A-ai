@@ -135,7 +135,10 @@ async function groq(key) {
   // ten minutes, so the time shown was soon in the past ("Resets at 11:48 AM"
   // at 11:53).
   if (lim) meters.push({ label: 'Requests today', pct: pct(((lim - left) / lim) * 100), detail: `${lim - left} of ${lim}` })
-  if (tlim) meters.push({ label: 'Tokens this minute', pct: pct(((tlim - tleft) / tlim) * 100), detail: `${tlim - tleft} of ${tlim}` })
+  // Read once every ten minutes (each reading costs one of the day's
+  // requests), so it says when: "this minute" read as live, and never moved.
+  const at = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  if (tlim) meters.push({ label: 'Tokens per minute', pct: pct(((tlim - tleft) / tlim) * 100), detail: `${tlim - tleft} of ${tlim} · checked ${at}` })
   if (!meters.length) throw new Error(r.ok ? 'no limit headers' : `HTTP ${r.status}`)
   return { meters, note: model }
 }

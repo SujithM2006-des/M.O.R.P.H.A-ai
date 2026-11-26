@@ -274,7 +274,8 @@ class ChromeLink {
       const message = { method: 'execute_tool', params: { tool: name, args: args ?? {} } }
       try {
         return await this.request(message)
-      } catch (err) {
+      } catch {
+        // A dead connection: reconnect once and try again.
         this.reset()
         return await this.request(message)
       }

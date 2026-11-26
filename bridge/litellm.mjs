@@ -263,6 +263,21 @@ export async function startProxy({ force = false } = {}) {
       return true
     }
   }
-  console.log('[jarvis] LiteLLM did not start in 30 s')
+  // Slow, not failed: the first start of the day (Python warming its caches)
+  // took longer than 30 s, and this used to give up for good — Gemini, Groq
+  // and OpenRouter then showed "starting" until JARVIS was restarted, though
+  // LiteLLM was answering a minute later. Keep checking while it runs.
+  console.log('[jarvis] LiteLLM is slow to start - still waiting for it')
+  void (async () => {
+    for (let i = 0; i < 120 && proc === mine; i++) {
+      await new Promise((r) => setTimeout(r, 2500))
+      if (proc === mine && (await healthy())) {
+        up = true
+        console.log(`[jarvis] LiteLLM ready on ${PROXY_URL} (after a slow start)`)
+        return
+      }
+    }
+    if (proc === mine) console.log('[jarvis] LiteLLM did not start in 5 minutes')
+  })()
   return false
 }

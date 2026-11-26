@@ -132,6 +132,34 @@ export function useStatus(ms = 3000): Status | null {
   return s
 }
 
+/**
+ * Is the bridge answering right now? Checked every 4 s. The panels keep
+ * their last reading when it stops (so they don't go blank), which is why
+ * this is separate: with the bridge stopped, "Link" stayed green and System
+ * Status said LIVE until something was asked.
+ */
+export function useBridgeUp(): boolean {
+  const [up, setUp] = useState(true)
+  useEffect(() => {
+    let alive = true
+    const check = async () => {
+      try {
+        const r = await fetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(2500) })
+        if (alive) setUp(r.ok)
+      } catch {
+        if (alive) setUp(false)
+      }
+    }
+    void check()
+    const id = window.setInterval(check, 4000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+  return up
+}
+
 const muteSubs = new Set<() => void>()
 
 /** Whether the microphone is muted (from the popup or by voice), refreshed every 2 s. */
@@ -499,7 +527,9 @@ export function useSessionBusy(): boolean {
 
 /** A short word for the phase, for a status pill. */
 export const phaseLabel: Record<JarvisPhase, string> = {
-  offline: 'Offline',
+  // Not started yet: the browser holds sound back until the first click or
+  // key, and that click starts him. "Offline", in red, read as broken.
+  offline: 'Tap to start',
   boot: 'Starting',
   dormant: 'Online',
   waking: 'Listening',
@@ -525,8 +555,20 @@ const post = (path: string, body?: unknown) =>
     () => false,
   )
 
-/** Send a typed request, exactly as if it were spoken. */
-export const ask = (text: string) => (text.trim() ? post('/popup/ask', { text: text.trim() }) : Promise.resolve(false))
+/**
+ * Send a typed request, exactly as if it were spoken — to this window only.
+ * It used to go through the bridge, which hands typed requests to every open
+ * window, so with two open (or a browser tab too) each one answered it and
+ * Claude was paid twice. The bridge is the fallback for when this window
+ * cannot take it itself (still starting).
+ */
+export const ask = (text: string): Promise<boolean> => {
+  const t = text.trim()
+  if (!t) return Promise.resolve(false)
+  const local = (window as unknown as { __jarvisAsk?: (text: string) => boolean }).__jarvisAsk
+  if (local?.(t)) return Promise.resolve(true)
+  return post('/popup/ask', { text: t })
+}
 /** Start listening now (or, if already listening, stand by). */
 export const listen = () => post('/popup/mic')
 /** Mute or unmute the microphone (toggles without an argument). */

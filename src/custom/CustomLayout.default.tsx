@@ -18,6 +18,7 @@ import {
   removeEvent,
   type CalEvent,
   useStatus,
+  useBridgeUp,
   type JarvisPhase,
   type StockPart,
   assistantTitle,
@@ -308,13 +309,26 @@ function Calendar({ i, onClose }: { i: number; onClose?: () => void }) {
   const dayEvents = (d: Date) => events.filter((e) => onDay(e, d)).sort((a, b) => timeOf(a).localeCompare(timeOf(b)))
 
   const openAdd = (d?: Date) => {
-    setDate(ymd(d ?? picked ?? today))
+    let day = d ?? picked ?? today
+    // Today, 9:00 AM is often already gone (an entry saved there was marked
+    // done at once and never reminded anyone): the next whole hour instead —
+    // and after 11 PM, when there is none left today, 9:00 AM tomorrow.
+    let time = '09:00'
+    if (ymd(day) === ymd(new Date())) {
+      const next = new Date().getHours() + 1
+      if (next <= 23) time = `${String(next).padStart(2, '0')}:00`
+      else day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
+    }
+    setDate(ymd(day))
+    setTime(time)
     setText('')
     setError('')
     setAdding(true)
   }
   const save = async () => {
     if (!text.trim()) return setError('Say what the event is.')
+    const when = new Date(`${date}T${time || '09:00'}`)
+    if (when.getTime() < Date.now() - 60_000) return setError('That time has already passed — pick a later one.')
     const err = await addEvent(`${date}T${time || '09:00'}`, text.trim())
     if (err) return setError(err)
     setAdding(false)
@@ -630,7 +644,7 @@ function AnswerActions({ turn, request, requestId, latest }: { turn: Turn; reque
           title={copied ? 'Copied' : 'Copy'}
           aria-label="Copy"
           onClick={() =>
-            void navigator.clipboard?.writeText(turn.text).then(() => {
+            void copyAnswer(turn.text).then(() => {
               setCopied(true)
               window.setTimeout(() => setCopied(false), 1400)
             })
@@ -1028,7 +1042,7 @@ function ModelUsage({ i }: { i: number }) {
               const lim = u.limits?.[id]
               const l = lines[id]
               const opt = u.brains.options.find((o) => o.id === id)
-              const resting = /limit/.test(opt?.unavailable ?? '')
+              const resting = opt?.unavailable === 'resting'
               return (
                 <li key={id} className={id === u.brains.active ? 'vg-use-active' : ''}>
                   <div className="vg-use-row">
@@ -1080,6 +1094,68 @@ function ModelUsage({ i }: { i: number }) {
  * Red with a slash while muted. Keyboard: Enter/Space tap; Shift+Enter mutes.
  */
 const HOLD_MS = 700
+/**
+ * Copy a written answer: formatted (HTML) for Word, Docs and mail, and plain
+ * text without the markdown symbols for WhatsApp, Notepad and the like — each
+ * app takes the one it understands. It used to copy the raw markdown, so a
+ * paste into WhatsApp read "## Exam Study Tips" and "**Plan your time**".
+ */
+async function copyAnswer(md: string): Promise<void> {
+  const html = renderMarkdown(md)
+  // innerText needs the element on the page to keep line breaks.
+  const tmp = document.createElement('div')
+  tmp.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal'
+  tmp.innerHTML = html
+  document.body.appendChild(tmp)
+  const plain = tmp.innerText.replace(/\n{3,}/g, '\n\n').trim()
+  tmp.remove()
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      }),
+    ])
+  } catch {
+    await navigator.clipboard?.writeText(plain)
+  }
+}
+
+/**
+ * In a narrow window (split screen) the panels — Sessions, Model Usage, the
+ * time, the weather — sit below the orb, about a screen further down, with
+ * nothing to say so. This points there until the page is scrolled.
+ */
+function PanelsHint() {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>('.vg-root')
+    if (!root) return
+    const narrow = window.matchMedia('(max-width: 1100px)')
+    const check = () => setShow(narrow.matches && root.scrollHeight > root.clientHeight + 80 && root.scrollTop < 120)
+    check()
+    root.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    // The content height changes as panels load and the chat opens.
+    const t = window.setInterval(check, 1500)
+    return () => {
+      root.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+      window.clearInterval(t)
+    }
+  }, [])
+  if (!show) return null
+  return (
+    <button
+      type="button"
+      className="vg-panels-hint"
+      onClick={() => document.querySelector('.vg-left')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+    >
+      Sessions, usage &amp; more ↓
+    </button>
+  )
+}
+
 function MicButton({ muted, listening }: { muted: boolean; listening: boolean }) {
   const timer = useRef(0)
   const held = useRef(false)
@@ -1141,16 +1217,28 @@ function MicButton({ muted, listening }: { muted: boolean; listening: boolean })
 /** The model dropdown, left of the text box: Auto, or one AI to think with. */
 function BrainPick() {
   const b = useBrains()
+  // Phone width: the menu is about 100 px wide, and "Auto · Claude" was cut
+  // to "Auto · Cl…". Just the names there; the full text is in the tooltip.
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 680px)').matches)
+  useEffect(() => {
+    const m = window.matchMedia('(max-width: 680px)')
+    const f = () => setNarrow(m.matches)
+    m.addEventListener('change', f)
+    return () => m.removeEventListener('change', f)
+  }, [])
   if (!b) return null
   const fellBack = b.choice !== 'auto' && b.active && b.active !== b.choice
   return (
     <label className={`vg-brain ${fellBack ? 'vg-brain-fb' : ''}`} title={`Answering now: ${b.activeLabel}`}>
       <select value={b.choice} onChange={(e) => void setBrain(e.target.value)} aria-label="AI model">
-        <option value="auto">Auto · {b.activeLabel}</option>
+        <option value="auto">{narrow ? 'Auto' : `Auto · ${b.activeLabel}`}</option>
         {b.options.map((o) => (
           <option key={o.id} value={o.id} disabled={Boolean(o.unavailable) && o.unavailable !== 'starting'}>
             {o.label}
-            {o.unavailable ? ` — ${o.unavailable}` : ''}
+            {o.unavailable && !narrow ? ` · ${o.unavailable}` : ''}
+            {/* Picked but not ready: say who is really answering. It used to
+                show only "Groq" while Claude answered, unannounced. */}
+            {fellBack && o.id === b.choice && !narrow ? ` → ${b.activeLabel}` : ''}
           </option>
         ))}
       </select>
@@ -1243,6 +1331,8 @@ function AskBar() {
       <textarea
         ref={box}
         rows={1}
+        // Screen readers don't read the grey hint as the box's name.
+        aria-label="Ask Jarvis"
         value={text}
         placeholder={muted ? 'Microphone muted — type here, or hold the mic to unmute' : listening ? caption || 'Listening…' : inChat ? 'Reply…  (Shift+Enter for a new line)' : 'Ask me anything…'}
         onChange={(e) => {
@@ -1332,6 +1422,7 @@ export default function CustomLayout() {
   useHide(HIDE)
   const now = useNow(1000)
   const s = useStatus()
+  const bridgeUp = useBridgeUp()
   const { phase, level, caption, activeTool } = useJarvis()
   const muted = useMuted()
   const [nav, setNav] = useState('home')
@@ -1387,7 +1478,7 @@ export default function CustomLayout() {
           : phase === 'speaking'
             ? 'Responding'
             : phase === 'offline'
-              ? 'Offline'
+              ? 'Tap anywhere to start'
               : `At your service, ${NAME}`
 
   const profile = useProfile()
@@ -1433,6 +1524,7 @@ export default function CustomLayout() {
 
   return (
     <div className={`vg-root vg-ph-${phase} ${chat ? 'vg-chat' : ''}`}>
+      <PanelsHint />
       <div className="vg-bg" aria-hidden="true">
         <div className="vg-grid" />
         {Array.from({ length: 16 }, (_, i) => (
@@ -1455,11 +1547,14 @@ export default function CustomLayout() {
           <span className="vg-hm-line" />
           {/* Live system chips: the link to the brain, voice and microphone. */}
           <span className="vg-sys">
-            <span className={`vg-sc ${phase !== 'offline' && s ? 'vg-ok' : 'vg-bad'}`}>
+            <span
+              className={`vg-sc ${s && bridgeUp ? 'vg-ok' : 'vg-bad'}`}
+              title={bridgeUp ? 'Connected to Jarvis' : "Jarvis's background service isn't answering — restart Jarvis"}
+            >
               <i />
               Link
             </span>
-            <span className={`vg-sc ${phase === 'offline' ? 'vg-bad' : 'vg-ok'}`}>
+            <span className={`vg-sc ${phase === 'offline' ? 'vg-wait' : 'vg-ok'}`}>
               <span className="vg-eq"><i /><i /><i /><i /></span>
               Voice · {phaseLabel[phase] ?? 'Online'}
             </span>
@@ -1606,7 +1701,7 @@ export default function CustomLayout() {
 
       {/* Right column */}
       <div className="vg-col vg-right">
-        <Panel title="System Status" icon={I.pulse} i={3} className="vg-status" extra={<span className="vg-live">LIVE</span>}>
+        <Panel title="System Status" icon={I.pulse} i={3} className="vg-status" extra={bridgeUp ? <span className="vg-live">LIVE</span> : <span className="vg-live vg-stale" title="Jarvis's background service isn't answering — these are the last readings">PAUSED</span>}>
           <div className="vg-gauges">
             <Gauge label="CPU" value={s ? s.cpu : null} />
             <Gauge label="Memory" value={mem} />

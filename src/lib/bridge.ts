@@ -366,12 +366,19 @@ function connect(): Promise<WebSocket> {
        * So say both, and put the actual port in front of them, since that is
        * the fact that distinguishes the two cases at a glance.
        */
+      // Plain words first (it is read by the person, not a developer); the
+      // port explanation only when the port is actually the likely cause.
+      const port = Number(location.port || 80)
+      const trusted = (port >= 5173 && port <= 5199) || (port >= 4173 && port <= 4199)
       settle(
         new Error(
-          `Cannot reach the bridge at ${BRIDGE_WS_URL}. Either it is not ` +
-            'running (start it with `npm start`), or this page is on a port it ' +
-            `refuses — it accepts localhost:5173-5199 and 4173-4199, and this ` +
-            `page is on ${location.port || '80'}.`,
+          trusted
+            ? "Jarvis's background service isn't answering, so I couldn't do that. " +
+                'It restarts by itself after a crash — ask again in a few seconds. ' +
+                'If this keeps happening, close Jarvis and start it again.'
+            : `Cannot reach the bridge at ${BRIDGE_WS_URL}: this page is on port ` +
+                `${location.port || '80'}, and the bridge only accepts localhost:5173-5199 ` +
+                'and 4173-4199. Open Jarvis from one of those ports.',
         ),
       )
     }

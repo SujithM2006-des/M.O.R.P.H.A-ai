@@ -152,6 +152,20 @@ export function Setup() {
     }
   }, [open, profile])
 
+  // Esc closes it like Cancel (the calendar already did; this didn't). Not on
+  // the first-run screen, which has nothing to go back to.
+  useEffect(() => {
+    if (!open || !profile?.configured) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || saving) return
+      speechSynthesis.cancel()
+      applyTheme(profile?.theme)
+      setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, profile, saving])
+
   // The voices installed on the PC (the offline ones) arrive asynchronously in Chrome.
   useEffect(() => {
     if (!open) return
