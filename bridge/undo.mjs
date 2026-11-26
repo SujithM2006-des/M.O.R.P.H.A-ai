@@ -46,6 +46,11 @@ export function recordChange(steps, label = '') {
   save(list)
 }
 
+/** The last `n` changes, newest first (undone ones included, marked). */
+export function recentChanges(n = 10) {
+  return load().slice(-n).reverse()
+}
+
 /** The newest change not yet undone, or null. */
 export function lastChange() {
   return load().filter((g) => !g.undone).at(-1) ?? null

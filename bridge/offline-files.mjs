@@ -16,7 +16,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import { lastUndoAt, recordChange } from './undo.mjs'
+import { lastUndoAt, recentChanges, recordChange } from './undo.mjs'
 
 const KNOWN = {
   downloads: 'Downloads', download: 'Downloads', documents: 'Documents', document: 'Documents', docs: 'Documents',
@@ -267,4 +267,121 @@ async function perform(todo, said, changes, open) {
       said.push(`${x.op === 'copy' ? 'copied' : 'moved'} ${basename(x.src)} into "${basename(x.to)}"`)
     }
   }
+}
+
+// ------------------------------------------------- questions about folders
+//
+// Offline, "what is the file present in the new folder in my downloads" and
+// "what was the last action you did in my downloads folder" went to the local
+// model, which said it had no access. Both need no model: the folder is read,
+// and what JARVIS did is in the undo log.
+
+/** When a change was made, as said ("12:45 AM", or "yesterday at 9:10 PM"). */
+function whenSaid(iso) {
+  const d = new Date(iso)
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const today = new Date().toDateString() === d.toDateString()
+  return today ? `at ${time}` : `on ${d.toLocaleDateString('en-US', { weekday: 'long' })} at ${time}`
+}
+
+/** "the new folder stored in my downloads" -> that folder's path (or null). */
+function folderFrom(phrase, home) {
+  const p = String(phrase)
+    .toLowerCase()
+    .replace(/[?.!]+$/, '')
+    .replace(/\s+folder$/, '')
+    .trim()
+  // A known folder on its own: "my downloads", "the documents".
+  const bare = clean(p)
+  if (KNOWN[bare]) return known(bare, home)
+  // "X (stored / that is / which is / kept) in my downloads".
+  const m = new RegExp(`^(.+?)\\s+(?:(?:that(?:'s| is)|which is|stored|store|kept|saved|present)\\s+)?(?:in|inside|on|from)\\s+(?:the\\s+|my\\s+)?(${KNOWN_RE})$`).exec(p)
+  if (!m) return null
+  const base = known(m[2], home)
+  if (!base) return null
+  const sub = clean(m[1])
+  // "the new folder": the one JARVIS made last in that place, if it is still there.
+  if (/^(?:created )?new$|^new folder$/.test(sub)) {
+    for (const g of recentChanges(30)) {
+      const made = g.steps.find((s) => s.op === 'mkdir' && s.to && s.to.toLowerCase().startsWith(base.toLowerCase()) && existsSync(s.to))
+      if (made && !g.undone) return made.to
+    }
+  }
+  return findIn(base, sub, { folders: true })
+}
+
+const nice = (n) => n.replace(/\.(exe|msi|zip|pdf|docx?|xlsx?|pptx?|png|jpe?g|mp4|mp3|txt)$/i, (e) => e.toLowerCase())
+
+/**
+ * "what's in my downloads", "what is the file present in the new folder in my
+ * downloads", "list the files in documents", "how many files are in desktop",
+ * "which is the newest file in downloads". Returns what to say, or null.
+ */
+export function folderQuestion(text, { home = homedir() } = {}) {
+  const t = String(text)
+    .toLowerCase()
+    .replace(/^\[.*?\]\s*/, '')
+    .replace(/^(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+/, '')
+    .replace(/^(?:can you |could you |please )?(?:tell me |show me )?/, '')
+    .replace(/[?.!]+$/, '')
+    .trim()
+  let m
+  let where = null
+  let ask = 'list'
+  if ((m = /^(?:what|which)\s+(?:is|are)\s+(?:the\s+)?(?:files?|things?|items?|contents?|stuff)\s+(?:(?:present|there|kept|stored)\s+)?(?:in|inside)\s+(.+)$/.exec(t))) where = m[1]
+  else if ((m = /^what(?:'s| is| all is)\s+(?:there\s+)?(?:in|inside)\s+(.+)$/.exec(t))) where = m[1]
+  else if ((m = /^(?:list|show)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?(?:files|contents|things)\s+(?:in|of|inside)\s+(.+)$/.exec(t))) where = m[1]
+  else if ((m = /^how many\s+(?:files|things|items)\s+(?:are\s+)?(?:there\s+)?(?:in|inside)\s+(.+)$/.exec(t))) [where, ask] = [m[1], 'count']
+  else if ((m = /^(?:which|what)\s+is\s+the\s+(?:newest|latest|most recent)\s+(?:file|download|thing)\s+(?:in|inside)\s+(.+)$/.exec(t))) [where, ask] = [m[1], 'newest']
+  else return null
+  const dir = folderFrom(where, home)
+  if (!dir) return null
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => !/^(desktop\.ini|thumbs\.db)$/i.test(e.name) && !e.name.startsWith('.'))
+      .map((e) => {
+        let at = 0
+        try {
+          at = statSync(join(dir, e.name)).mtimeMs
+        } catch {
+          /* gone */
+        }
+        return { name: e.name, folder: e.isDirectory(), at }
+      })
+  } catch {
+    return null
+  }
+  const name = basename(dir)
+  if (!entries.length) return `"${name}" is empty.`
+  const files = entries.filter((e) => !e.folder)
+  const folders = entries.filter((e) => e.folder)
+  const counts = [files.length && `${files.length} file${files.length === 1 ? '' : 's'}`, folders.length && `${folders.length} folder${folders.length === 1 ? '' : 's'}`].filter(Boolean).join(' and ')
+  if (ask === 'count') return `"${name}" has ${counts}.`
+  if (ask === 'newest') {
+    const newest = [...files].sort((a, b) => b.at - a.at)[0]
+    return newest ? `The newest file in "${name}" is ${nice(newest.name)}.` : `"${name}" has no files, only ${counts}.`
+  }
+  const shown = [...entries].sort((a, b) => b.at - a.at).slice(0, 8).map((e) => (e.folder ? `the folder ${e.name}` : nice(e.name)))
+  const more = entries.length > shown.length ? `, and ${entries.length - shown.length} more` : ''
+  return entries.length === 1 ? `"${name}" has one ${entries[0].folder ? 'folder' : 'file'}: ${shown[0].replace(/^the folder /, '')}.` : `"${name}" has ${counts}: ${shown.join(', ')}${more}.`
+}
+
+/**
+ * "what was the last action you did (in my downloads)", "what did you just
+ * do", "what did you change" — from the undo log. Returns what to say, or null.
+ */
+export function lastActionQuestion(text, { home = homedir() } = {}) {
+  const t = String(text).toLowerCase().replace(/^\[.*?\]\s*/, '').replace(/[?.!]+$/, '').trim()
+  const asks =
+    /\b(?:last|latest|previous|recent)\s+(?:action|thing|change|task|job|command)s?\b.*\byou\b|\byou\b.*\b(?:last|latest|previous|recent)\s+(?:action|thing|change|task|job)\b|^what did you (?:just )?(?:do|change|move)\b|^what have you (?:just )?(?:done|changed)\b/.test(t)
+  if (!asks) return null
+  const place = new RegExp(`\\b(${KNOWN_RE})\\b`).exec(t)?.[1]
+  const dir = place ? known(place, home) : null
+  const list = recentChanges(30).filter((g) => !dir || g.steps.some((s) => ((s.to || '') + '|' + (s.from || '')).toLowerCase().includes(dir.toLowerCase())))
+  const g = list[0]
+  const where = dir ? ` in ${basename(dir)}` : ''
+  if (!g) return `I haven't changed anything${where} that I can remember.`
+  const what = (g.label || 'a file change').replace(/^opened [^,]+,\s*/, '')
+  return `The last thing I did${where} was ${whenSaid(g.at)}: I ${what}.${g.undone ? ' That was undone afterwards.' : ' Say "undo" to reverse it.'}`
 }

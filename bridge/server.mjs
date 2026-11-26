@@ -22,7 +22,7 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { pcServer, runPcTool } from './pc.mjs'
-import { offlineFileSteps } from './offline-files.mjs'
+import { folderQuestion, lastActionQuestion, offlineFileSteps } from './offline-files.mjs'
 import { ollamaIsOurs, parkOllamaStartup, startOllama, stopOllama } from './ollama.mjs'
 import { UNDO_RE, lastChange, undoLast } from './undo.mjs'
 import { matchRoutine, routineCommand } from './routines.mjs'
@@ -2227,6 +2227,15 @@ async function directAnswer(text) {
     if (said) return { say: said }
   }
   if (UNDO_RE.test(plain)) return { say: await undoLast(), tool: 'undo_last_change' }
+  // "What was the last thing you did (in Downloads)?" — the undo log knows;
+  // the models don't (they said "I don't have a record").
+  const did = lastActionQuestion(plain)
+  if (did) return { say: did }
+  // Offline: "what's in the new folder in my downloads" — read the folder.
+  if (isLocalBrain()) {
+    const inside = folderQuestion(plain)
+    if (inside) return { say: inside, tool: 'list_folder' }
+  }
   if (CHECKUP_RE.test(plain)) return { say: (await checkup()).summary }
   const said = routineCommand(plain)
   if (said) return { say: said }
