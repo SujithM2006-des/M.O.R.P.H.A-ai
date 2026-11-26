@@ -332,6 +332,10 @@ html[data-theme-hue] #root .vg-cal-error { filter: hue-rotate(calc(-1 * var(--th
 .su-acc-name small { opacity: 0.7; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .su-acc-done { display: inline-flex; align-items: center; gap: 12px; }
 .su-acc-ok { color: #4ee6a8; font-weight: 600; font-size: 13px; }
+/* Claude when not signed in: optional, not an error. */
+.su-acc-opt { color: #8fb4d6; font-size: 12.5px; padding: 3px 10px; border: 1px solid rgba(63, 182, 255, 0.3); border-radius: 999px; }
+/* No AI connected at all yet. */
+.su-acc-need { margin: 8px 0 0; padding: 8px 12px; border-radius: 9px; border: 1px solid rgba(255, 190, 90, 0.45); background: rgba(110, 70, 10, 0.25); color: #ffd38a; font-size: 13px; }
 .su-acc-off {
   background: none;
   border: 0;

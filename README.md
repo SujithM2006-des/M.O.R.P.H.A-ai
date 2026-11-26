@@ -9,8 +9,13 @@ WhatsApp messages and files, setting reminders, reading your screen, checking
 your mail and calendar, and answering like the JARVIS from the films.
 
 The face is a web page (React + Vite + Three.js) in its own Chrome window. The
-brain is **Claude Code, run headless** through the Claude Agent SDK — so it uses
-your existing Claude Code login. No API key is required.
+brain runs through the Claude Agent SDK, and **no Claude subscription is
+needed**: sign in to Gemini, OpenRouter or Groq in setup (free, with your Google
+account — no key to copy) and Jarvis thinks with those. If you do have a Claude
+plan, sign in once in Claude Code and Jarvis uses Claude first, switching to the
+free AIs by himself when Claude is at its limit or signed out. With no internet,
+a local model (Ollama) answers. Claude-only extras: Gmail, Calendar & Drive
+through your Claude account.
 
 ---
 

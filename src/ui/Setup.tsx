@@ -63,6 +63,8 @@ const THEMES: { id: string; label: string; hue: number; swatch: string }[] = [
 
 /** From the bridge's /accounts: connected or not (null: still checking), and sign-ins in progress. */
 type Accounts = Record<'gemini' | 'groq' | 'openrouter' | 'chatgpt', { connected: boolean | null }> & {
+  /** Claude through Claude Code: optional, Jarvis works on the free AIs without it. */
+  claude?: { connected: boolean; plan: string | null; expired: boolean }
   running: boolean
   jobs: Record<string, { state: string; note: string }>
 }
@@ -500,11 +502,32 @@ export function Setup() {
           <div className="su-field">
             <span>AI accounts</span>
             <small>
-              Claude works with your Claude login. Sign in to these as well and JARVIS can think with Gemini, Groq or
-              OpenRouter (free) — pick one beside the text box, or leave it on Auto to switch when a limit is reached — and
-              draw story characters with ChatGPT. A window opens to sign in; JARVIS sets up the rest. Nothing to copy or paste.
+              No Claude subscription needed: JARVIS thinks with Gemini, OpenRouter or Groq — all free — and uses Claude
+              too if you have it. Leave the model on Auto and he switches by himself when one is unavailable or at its
+              limit. ChatGPT draws story characters. A window opens to sign in; JARVIS sets up the rest. Nothing to copy or
+              paste.
             </small>
+            {/* Nothing to think with yet: say so plainly, before the list. */}
+            {accounts && !accounts.claude?.connected && !accounts.gemini?.connected && !accounts.openrouter?.connected && !accounts.groq?.connected && (
+              <p className="su-acc-need">
+                Sign in to at least one below — Gemini or OpenRouter is best (free, and they can use all of JARVIS's tools).
+              </p>
+            )}
             <ul className="su-accounts">
+              {/* Claude: shown, not signed in from here (that's done in Claude Code). */}
+              <li className={accounts?.claude?.connected ? 'su-acc-on' : ''}>
+                <span className="su-acc-name">
+                  <b>Claude</b>
+                  <small>
+                    {accounts?.claude?.connected
+                      ? `Your Claude${accounts.claude.plan && accounts.claude.plan !== 'API key' ? ` ${accounts.claude.plan[0].toUpperCase()}${accounts.claude.plan.slice(1)}` : ''} plan, through Claude Code — used first on Auto`
+                      : accounts?.claude?.expired
+                        ? 'Signed out — sign in again in Claude Code to use it. Until then the free AIs answer.'
+                        : 'Optional. With a Claude plan, sign in once in Claude Code. Without it the free AIs answer.'}
+                  </small>
+                </span>
+                {accounts?.claude?.connected ? <span className="su-acc-ok">✓ Connected</span> : <span className="su-acc-opt">Optional</span>}
+              </li>
               {ACCOUNTS.map((a) => {
                 const job = accounts?.jobs?.[a.id]
                 const busy = job && (job.state === 'working' || job.state === 'waiting')
@@ -574,7 +597,11 @@ export function Setup() {
               <label className={`su-feat ${form.connectors ? 'su-on' : ''}`}>
                 <input type="checkbox" checked={form.connectors === true} onChange={(e) => set({ connectors: e.target.checked })} />
                 <b>Gmail, Calendar & Drive</b>
-                <small>Through your Claude account — uses more of your Claude usage</small>
+                <small>
+                  {accounts?.claude && !accounts.claude.connected
+                    ? 'Needs a Claude plan (these come through your Claude account) — off without one'
+                    : 'Through your Claude account — uses more of your Claude usage'}
+                </small>
               </label>
             </div>
           </div>

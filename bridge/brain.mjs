@@ -177,6 +177,41 @@ export function setProxyCheck(fn) {
   proxyUp = fn
 }
 
+/**
+ * Is Claude signed in on this PC (a Claude subscription through Claude Code,
+ * or an API key)? Jarvis works without it — Gemini, OpenRouter and Groq are
+ * free, and the local model needs no account — so when it isn't, Auto skips
+ * Claude instead of sending every question to a login that isn't there.
+ *
+ * Claude Code keeps its login in ~/.claude/.credentials.json on Windows and
+ * Linux (CLAUDE_CONFIG_DIR moves it). macOS keeps it in the Keychain, which
+ * can't be read here, so there it counts as signed in, and a failed answer
+ * (an auth error) is what moves Jarvis on. Read at most every 30 s.
+ */
+let loginCache = { at: 0, value: null }
+export function claudeLogin() {
+  if (loginCache.value && Date.now() - loginCache.at < 30_000) return loginCache.value
+  let value
+  if (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    value = { signedIn: true, plan: 'API key' }
+  } else if (process.platform === 'darwin') {
+    value = { signedIn: true, plan: null }
+  } else {
+    try {
+      const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+      const o = JSON.parse(readFileSync(join(dir, '.credentials.json'), 'utf8')).claudeAiOauth
+      const ended = Boolean(o?.refreshTokenExpiresAt && Number(o.refreshTokenExpiresAt) < Date.now())
+      value = o?.accessToken || o?.refreshToken
+        ? { signedIn: !ended, plan: o.subscriptionType ?? null, expired: ended }
+        : { signedIn: false, plan: null }
+    } catch {
+      value = { signedIn: false, plan: null }
+    }
+  }
+  loginCache = { at: Date.now(), value }
+  return value
+}
+
 /** Can this provider answer right now? "" if yes, else why not. */
 export function unavailable(id) {
   const p = PROVIDERS[id]
@@ -185,6 +220,7 @@ export function unavailable(id) {
   // long reason was cut off there.
   if (p.needs === 'ollama') return state.model ? '' : 'not installed'
   if (!state.online) return 'offline'
+  if (id === 'claude' && !claudeLogin().signedIn) return claudeLogin().expired ? 'sign in again' : 'not signed in'
   if (p.needs === 'key') {
     if (!readKeys()[id]?.key) return 'not connected'
     if (!proxyUp()) return 'starting'

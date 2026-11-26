@@ -33,7 +33,7 @@ import { naturalSay, naturalVoices, warmNaturalVoices } from './voices.mjs'
 
 // Ready before the first sentence: the helper starts and the list is fetched.
 warmNaturalVoices()
-import { LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
+import { claudeLogin, LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
 import { PROXY_URL, proxyIsUp, proxyKey, startProxy } from './litellm.mjs'
 import { newsPrompt, newsServer, startNews } from './news.mjs'
 import { PROMPT_CREATOR, creatorServer } from './creator.mjs'
@@ -1442,6 +1442,8 @@ const handleRequest = async (req, res) => {
     res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     return res.end(
       JSON.stringify({
+        // Optional: Jarvis works on the free AIs without it.
+        claude: { connected: claudeLogin().signedIn, plan: claudeLogin().plan ?? null, expired: Boolean(claudeLogin().expired) },
         gemini: { connected: Boolean(k.gemini) },
         groq: { connected: Boolean(k.groq) },
         openrouter: { connected: Boolean(k.openrouter) },
@@ -2033,11 +2035,24 @@ function switchBrains(news) {
   }
 }
 
+/**
+ * Questions being answered right now (any window, any session), with when
+ * each started. A model switch reconnects every window, and one made while a
+ * question was in flight dropped it: without a Claude login Jarvis starts on
+ * the local model and moves to OpenRouter as soon as LiteLLM is up — so a
+ * question asked in those first seconds was simply lost.
+ */
+const IN_FLIGHT = new Map()
+
 setInterval(async () => {
   const wasOnline = brainState().online
   await checkBrain()
   const next = currentBrain()
   if (next === activeBrain) return
+  // Let a question in progress finish first (checked again in 6 s) — unless
+  // one has been going 3 minutes, which is stuck rather than busy.
+  const oldest = Math.min(...IN_FLIGHT.values())
+  if (IN_FLIGHT.size && Date.now() - oldest < 3 * 60_000) return
   const label = next ? PROVIDERS[next].label : 'nothing'
   switchBrains(
     !brainState().online && wasOnline
@@ -2129,7 +2144,21 @@ const LIMIT = /usage limit|rate.?limit|\b429\b|\b529\b|quota|credit balance|insu
  * answer (a bad request, a broken model, a server error) — not a limit.
  */
 function providerBroke(msg) {
-  return /^\s*API Error:\s*[45]\d\d\b/i.test(String(msg.result ?? '')) || (msg.subtype !== 'success' && /API Error:\s*[45]\d\d/i.test(String(msg.errors ?? '')))
+  return (
+    claudeAuthFailed(msg) ||
+    /^\s*API Error:\s*[45]\d\d\b/i.test(String(msg.result ?? '')) ||
+    (msg.subtype !== 'success' && /API Error:\s*[45]\d\d/i.test(String(msg.errors ?? '')))
+  )
+}
+/**
+ * Claude refused because of the login, not the question: signed out, the
+ * token expired or revoked, the subscription ended. Jarvis then carries on
+ * with the free AIs instead of failing every question.
+ */
+const CLAUDE_AUTH = /invalid api key|please run \/login|not logged in|log ?in again|oauth token (has )?(expired|been revoked)|authentication_error|\b401\b|subscription (has )?(ended|expired|been cancel)|no (active )?subscription/i
+function claudeAuthFailed(msg) {
+  const text = [msg.result, ...(Array.isArray(msg.errors) ? msg.errors : [msg.errors])].filter(Boolean).join(' ')
+  return CLAUDE_AUTH.test(text) && (msg.subtype !== 'success' || msg.is_error === true || /^(api error|invalid api key)/i.test(String(msg.result ?? '')))
 }
 /**
  * How long to rest a provider after a refusal: what it said ("try again in
@@ -2139,6 +2168,8 @@ function providerBroke(msg) {
  */
 function restMinutes(msg, limit) {
   const text = [msg.result, ...(Array.isArray(msg.errors) ? msg.errors : [msg.errors])].filter(Boolean).join(' ')
+  // Claude's login or subscription: not coming back by itself in minutes.
+  if (CLAUDE_AUTH.test(text)) return 12 * 60
   const wait = /try again in\s*(?:(\d+)m)?\s*([\d.]+)\s*s/i.exec(text)
   if (wait) return Math.max(1, Math.ceil((Number(wait[1] ?? 0) * 60 + Number(wait[2])) / 60))
   if (/per minute|\bTPM\b|\bRPM\b/i.test(text)) return 1
@@ -2463,6 +2494,8 @@ wss.on('connection', (socket) => {
     let cancelledAsk = null
     /** A request is with the agent: set when delivered, cleared on its result. */
     let working = false
+    /** This conversation, as listed in IN_FLIGHT while it answers. */
+    const turnToken = {}
 
     const turnFinished = () =>
       new Promise((resolve) => {
@@ -2733,7 +2766,11 @@ wss.on('connection', (socket) => {
                 const next = currentBrain()
                 const from = PROVIDERS[sessionBrain]?.label ?? sessionBrain
                 const to = next ? PROVIDERS[next].label : null
-                const what = limit ? `${from}'s limit is reached` : `${from} isn't working right now`
+                const what = limit
+                  ? `${from}'s limit is reached`
+                  : claudeAuthFailed(msg)
+                    ? `${from} isn't signed in, or its subscription has ended`
+                    : `${from} isn't working right now`
                 const news =
                   to && next !== sessionBrain
                     ? `${what}, so I'm switching to ${to}.`
@@ -2779,6 +2816,7 @@ wss.on('connection', (socket) => {
               }
               cancelledAsk = null
               working = false
+              IN_FLIGHT.delete(turnToken)
               // Whatever was waiting on this turn to finish can go now. This is
               // the only place a turn is genuinely over.
               finishTurn?.()
@@ -2821,6 +2859,7 @@ wss.on('connection', (socket) => {
     function end() {
       if (closed) return
       closed = true
+      IN_FLIGHT.delete(turnToken)
       deliver?.(null)
       liveClaude.delete(session)
       session.close?.()
@@ -2873,6 +2912,7 @@ wss.on('connection', (socket) => {
             }
           }
           working = true
+          IN_FLIGHT.set(turnToken, Date.now())
           if (deliver) {
             const resolve = deliver
             deliver = null
@@ -2930,6 +2970,16 @@ wss.on('connection', (socket) => {
         : tidyAttached(text.replace(/^\[.*?\]\s*/, '')).slice(0, 300)
       popupState.said = ''
       popupState.tool = ''
+      // No AI at all: Claude not signed in, no free AI connected, no local
+      // model. Say how to fix it instead of failing on a login that isn't there.
+      if (!currentBrain()) {
+        const how = brainState().online
+          ? "I've no AI to think with yet. Claude isn't signed in, and no free AI is connected. Open Customize, then AI accounts, and sign in to Gemini or OpenRouter. They're free and only take a minute."
+          : "The internet is down and there's no local model installed, so I can't think until it's back."
+        popupState.said = how
+        send({ type: 'done', text: how, ask: typeof msg.id === 'string' ? msg.id : null, session: sid })
+        return
+      }
       conversation(sid).ask(text, typeof msg.id === 'string' ? msg.id : null)
     }
 
