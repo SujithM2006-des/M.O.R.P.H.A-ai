@@ -2177,7 +2177,19 @@ async function checkup() {
   return { items, summary }
 }
 
-const CHECKUP_RE = /^(?:(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+)?(?:please\s+)?(?:run\s+(?:a\s+)?|do\s+(?:a\s+)?)?(?:health\s*check|check[- ]?up|self[- ]?check|diagnostics?|check yourself|diagnose yourself|are you (?:working|ok|okay)(?: properly)?|is everything (?:working|ok|okay))[.!?]*$/i
+/**
+ * "Go to standby" and its kin: answered at once, and he stands down. Offline
+ * the recogniser blurs it ("if you don't do stand balewadi"), so in a short
+ * phrase any "stand by/bye/ba…" counts too.
+ */
+function isStandby(plain) {
+  const t = plain.toLowerCase().replace(/^(?:(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+)/, '').replace(/[.!?,]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/^(?:please )?(?:go (?:to|into|back to) )?(?:stand ?by|sleep)(?: mode)?(?: please)?$/.test(t)) return true
+  if (/^(?:stop(?: listening)?|cancel|never ?mind|that'?s all|nothing|go to sleep)$/.test(t)) return true
+  return t.split(' ').length <= 7 && /\bstand\s?(?:by|bye|buy|ba\w*)\b|\bstandby\b/.test(t)
+}
+
+const CHECKUP_RE =/^(?:(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+)?(?:please\s+)?(?:run\s+(?:a\s+)?|do\s+(?:a\s+)?)?(?:health\s*check|check[- ]?up|self[- ]?check|diagnostics?|check yourself|diagnose yourself|are you (?:working|ok|okay)(?: properly)?|is everything (?:working|ok|okay))[.!?]*$/i
 
 /** A routine's steps, offline: each through the same no-model shortcuts. */
 async function runRoutineOffline(r) {
@@ -2198,6 +2210,13 @@ async function runRoutineOffline(r) {
  */
 async function directAnswer(text) {
   const plain = String(text ?? '').replace(/^\[.*?\]\s*/, '').trim()
+  if (isStandby(plain)) return { say: 'Standing by.' }
+  // A blurred "what's the time now" ("last-ditch dead time now"): a short
+  // phrase ending in "time now" is a time question.
+  if (plain.split(/\s+/).length <= 6 && /\btime\s+(?:now|is it|please)[.?!]*$/i.test(plain)) {
+    const said = quickAnswer('what time is it')
+    if (said) return { say: said }
+  }
   if (UNDO_RE.test(plain)) return { say: await undoLast(), tool: 'undo_last_change' }
   if (CHECKUP_RE.test(plain)) return { say: (await checkup()).summary }
   const said = routineCommand(plain)

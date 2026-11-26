@@ -245,6 +245,88 @@ def load_big_model():
     threading.Thread(target=work, daemon=True).start()
 
 
+# Whisper (faster-whisper, int8 on the CPU) for the COMMAND, offline. Vosk
+# keeps listening for "Hey Jarvis" (fast, light); what is said after it is
+# transcribed by Whisper, which understood real speech far better — Vosk
+# turned a clean, unclipped command into "uphill oram these are it". small.en
+# takes ~3 s a command on this laptop, base.en ~1 s (measured); small first.
+WHISPER_DIRS = [HOME / "whisper" / "small.en", HOME / "whisper" / "base.en"]
+WHISPER = {"model": None, "loading": False}
+SAMPLES = HOME / "voice-samples"  # the last offline commands' audio, to check misheard ones
+
+
+def load_whisper():
+    def work():
+        try:
+            from faster_whisper import WhisperModel
+
+            logging.getLogger("faster_whisper").setLevel(logging.WARNING)  # not "VAD filter removed…" per command
+            path = next((p for p in WHISPER_DIRS if (p / "model.bin").exists()), None)
+            if not path:
+                return
+            t0 = time.monotonic()
+            WHISPER["model"] = WhisperModel(str(path), device="cpu", compute_type="int8")
+            log(f"Whisper ({path.name}) ready for offline commands ({time.monotonic() - t0:.0f}s to load)")
+        except Exception as err:
+            log(f"Whisper unavailable, using Vosk for commands: {err}")
+        finally:
+            WHISPER["loading"] = False
+
+    WHISPER["loading"] = True
+    threading.Thread(target=work, daemon=True).start()
+
+
+# Whisper's well-known inventions on silence or noise.
+PHANTOMS = {"", "you", "thank you", "thanks", "thank you for watching", "thanks for watching", "bye", "okay", "ok", "so"}
+
+
+def whisper_text(pcm):
+    """The command in `pcm` by Whisper, as plain lower-case words ("9 p.m." ->
+    "9 pm"); "" if Whisper is not ready or heard only noise."""
+    m = WHISPER["model"]
+    if m is None or not pcm:
+        return ""
+    import re
+
+    names = wake_names()
+    prompt = (
+        f"Commands spoken to an assistant called {', '.join(n.title() for n in names)}: go to standby, "
+        "what's the time now, what is my battery level, open Chrome, open my downloads, close Spotify, "
+        "remind me to call mom at 9 pm, what's on my calendar, create a new folder, volume up."
+    )
+    try:
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        segs, _ = m.transcribe(audio, language="en", beam_size=1, initial_prompt=prompt, vad_filter=True,
+                               condition_on_previous_text=False)
+        text = " ".join(s.text.strip() for s in segs).strip()
+    except Exception as err:
+        log(f"Whisper failed: {err}")
+        return ""
+    text = re.sub(r"\b([ap])\.\s?m\.?", r"\1m", text, flags=re.I)
+    text = re.sub(r"[^\w\s':/-]", " ", text).lower()
+    text = re.sub(r"\s+", " ", text).strip()
+    return "" if text in PHANTOMS else text
+
+
+def keep_sample(pcm, said):
+    """The last 20 offline commands' audio (with what was heard, in the name)."""
+    try:
+        import re
+        import wave
+
+        SAMPLES.mkdir(parents=True, exist_ok=True)
+        name = time.strftime("%Y%m%d-%H%M%S") + "-" + (re.sub(r"[^a-z0-9]+", "-", said.lower())[:40] or "nothing") + ".wav"
+        with wave.open(str(SAMPLES / name), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(RATE)
+            w.writeframes(pcm)
+        for old in sorted(SAMPLES.glob("*.wav"))[:-20]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def tones(*notes):
     """Short beeps: (frequency, ms) each. Best effort."""
     try:
@@ -294,7 +376,8 @@ COMMANDS = [
     "what is my cpu usage", "what is my memory usage", "am i connected to the internet", "which wifi am i on",
     "what is my system status", "what is the system status", "system status", "how is my laptop doing",
     "how is my computer doing", "how is my pc doing",
-    "go to standby", "stop", "cancel", "never mind",
+    "go to standby", "go to standby mode", "go to stand by", "go to stand by mode", "standby", "stand by",
+    "standby mode", "go to sleep", "sleep mode", "stop", "stop listening", "cancel", "never mind",
 ]
 
 
@@ -339,6 +422,40 @@ def transcribe(model, pcm):
     return " ".join(p for p in parts if p).strip()
 
 
+def keep_level():
+    """Offline, every 15 s: the Windows mic level back down to 75% if
+    something raised it (Chrome's own recogniser does, online). The clip
+    guard below only acts after speech has already clipped — the first
+    command after going offline was garbled every time ("what's the airplane
+    know"); this keeps it in range before anyone speaks."""
+    script = str(ROOT / "scripts" / "mic-level.ps1")
+    while True:
+        if OFFLINE["on"]:
+            try:
+                r = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Max", "75"],
+                    capture_output=True, text=True, timeout=30,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                level = r.stdout.strip()
+                if level and level != KEPT.get("level"):
+                    KEPT["level"] = level
+                    log(f"microphone level {level}% (kept at 75% or below offline)")
+            except Exception:
+                pass
+            time.sleep(15)
+        else:
+            time.sleep(3)
+
+
+KEPT = {"level": None}
+
+
+def clipped_share():
+    """The share of the last capture's samples at the limit (0.0-1.0)."""
+    return CAPTURE.get("clipped", 0) / max(1, CAPTURE.get("samples", 0))
+
+
 def clip_guard():
     """The command just heard clipped (peaks at the top of the range): the
     Windows mic level is too high — Chrome's gain control has pushed it to
@@ -346,18 +463,24 @@ def clip_guard():
     ("vantage they're paying now"). Lower it 15 points, never below 50%.
     Only after real clipping, so a level the user chose is otherwise left
     alone. In the background: the helper takes a second or two."""
-    if CAPTURE["loudest"] < 32000:
+    # Read now: the next capture resets them. Real clipping, not one click at
+    # the top of the range: over 0.2% of the samples flat at the limit. This
+    # microphone (a digital AMD array) has no "Microphone Boost" to lower, so
+    # the level is the only gain there is, and it may go as low as 30%.
+    loudest = CAPTURE["loudest"]
+    share = clipped_share()
+    if share < 0.002:
         return
 
     def run():
         try:
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                 str(ROOT / "scripts" / "mic-level.ps1"), "-Lower", "15", "-Floor", "50"],
+                 str(ROOT / "scripts" / "mic-level.ps1"), "-Lower", "10", "-Floor", "30"],
                 capture_output=True, text=True, timeout=30,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            log(f"speech clipped (loudest {CAPTURE['loudest']}) - microphone level now {r.stdout.strip()}%")
+            log(f"speech clipped ({share:.1%} of it, loudest {loudest}) - microphone level now {r.stdout.strip()}%")
         except Exception as err:
             log(f"speech clipped, could not lower the microphone level: {err}")
 
@@ -377,7 +500,10 @@ def offline_capture(stream, vosk_model, why, recent=None):
     model = BIG["model"] or vosk_model
     if recent:
         pcm = b"".join(recent)
-        said = grammar_command(model, pcm, with_wake=True) or command_after_name(transcribe(model, pcm))
+        heard = whisper_text(pcm)
+        said = command_after_name(heard) if heard else ""
+        if not said:
+            said = grammar_command(model, pcm, with_wake=True) or command_after_name(transcribe(model, pcm))
         if len(said.split()) >= 2:
             tones((880, 90), (1320, 110))
             ok = ask_bridge(said)
@@ -389,7 +515,7 @@ def offline_capture(stream, vosk_model, why, recent=None):
     clip_guard()
     if said:
         ok = ask_bridge(said)
-        log(f'offline command ({why}): "{said}"' + ("" if ok else " (could not reach JARVIS)"))
+        log(f'offline command ({why}): "{said}" (loudest {CAPTURE["loudest"]}, clipped {clipped_share():.1%})' + ("" if ok else " (could not reach JARVIS)"))
     else:
         tones((440, 220))  # nothing heard: try again
         log(f"offline ({why}): nothing heard (loudest {CAPTURE['loudest']})")
@@ -412,6 +538,8 @@ def capture_command(stream, vosk_model, limit=8.0, quiet=1.3, save=True):
     # natural pause before the command ("nothing heard", measured offline).
     settle = 0.7
     CAPTURE["loudest"] = 0
+    CAPTURE["samples"] = 0
+    CAPTURE["clipped"] = 0
     captured = []  # the command's audio, for the everyday-command check
     while time.monotonic() - start < limit:
         if stream.read_available < CHUNK:
@@ -423,6 +551,8 @@ def capture_command(stream, vosk_model, limit=8.0, quiet=1.3, save=True):
         captured.append(audio.tobytes())
         peak = int(np.abs(audio).max())
         CAPTURE["loudest"] = max(CAPTURE["loudest"], peak)
+        CAPTURE["samples"] = CAPTURE.get("samples", 0) + audio.size
+        CAPTURE["clipped"] = CAPTURE.get("clipped", 0) + int((np.abs(audio.astype(np.int32)) >= 32000).sum())
         # 1000, not 1500: a normal voice a little way from the laptop peaked
         # around 1,000-1,800 here and was taken for silence.
         if peak > 1000:
@@ -436,14 +566,24 @@ def capture_command(stream, vosk_model, limit=8.0, quiet=1.3, save=True):
             break  # nothing said after his name: he will just listen
     parts.append(json.loads(rec.FinalResult()).get("text", ""))
     text = " ".join(p for p in parts if p).strip()
-    # An everyday command heard clearly against the list beats a blurred
-    # free-form reading of it.
-    if captured:
-        sure = grammar_command(vosk_model, b"".join(captured))
+    pcm = b"".join(captured)
+    # Whisper, when it is loaded (offline), reads the command far better than
+    # Vosk; Vosk's reading is the fallback.
+    heard = whisper_text(pcm) if heard_at else ""
+    if heard:
+        if heard != text:
+            log(f'Whisper heard "{heard}" (Vosk heard "{text}")')
+        text = heard
+    # Without Whisper: an everyday command heard clearly against the list
+    # beats a blurred free-form reading of it.
+    elif captured:
+        sure = grammar_command(vosk_model, pcm)
         if sure:
             if sure != text:
                 log(f'everyday command "{sure}" (free-form heard "{text}")')
             text = sure
+    if not save and heard_at:
+        keep_sample(pcm, text)
     # Strip a repeated wake phrase the recogniser may have caught again
     # ("hello friday", "friday", "hey jarvis" …).
     leads = sorted({f"{g} {n}" for n in wake_names() for g in GREETINGS} | set(wake_names()), key=len, reverse=True)
@@ -559,6 +699,7 @@ def main():
     if vosk_model is not None:
         vosk_rec = make_rec()
     log(f"ready (threshold {args.threshold}, Vosk {'on' if vosk_rec else 'off'}, answers to: {', '.join(names)})")
+    threading.Thread(target=keep_level, daemon=True).start()
 
     stream = None
     last_fire = 0.0  # last time the phrase was acted on at all
@@ -629,6 +770,8 @@ def main():
                     log("offline mode: listening for the phrase more readily" if OFFLINE["on"] else "back online")
                 if OFFLINE["on"] and BIG_DIR.exists() and BIG["model"] is None and not BIG["loading"]:
                     load_big_model()
+                if OFFLINE["on"] and WHISPER["model"] is None and not WHISPER["loading"]:
+                    load_whisper()
                 if running != jarvis_on:
                     jarvis_on = running
                     log(

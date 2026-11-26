@@ -118,6 +118,18 @@ Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4
 Expand-Archive "$dir\model.zip" -DestinationPath $dir; Remove-Item "$dir\model.zip"
 ```
 
+Recommended for voice commands **without the internet**: Whisper (~460 MB),
+which understands real speech far better than Vosk. With it, Vosk only listens
+for "Hey Jarvis" and Whisper reads the command (about 3 s on a laptop CPU):
+
+```bat
+"%USERPROFILE%\.jarvis\wake-venv\Scripts\python.exe" -m pip install faster-whisper
+"%USERPROFILE%\.jarvis\wake-venv\Scripts\python.exe" -c "from faster_whisper import download_model as d; import os; d('small.en', output_dir=os.path.expanduser('~/.jarvis/whisper/small.en'))"
+```
+
+The last 20 offline commands' audio is kept in `~/.jarvis/voice-samples` (with
+what was heard in each file's name), to check one that was misheard.
+
 Then put the switch on your desktop:
 
 ```bat

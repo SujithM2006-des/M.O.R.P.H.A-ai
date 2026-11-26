@@ -2,7 +2,8 @@
 # it by that many points, never below -Floor. Used by the wake listener when
 # speech clips (peaks at the very top of the range), which garbles what the
 # offline recogniser hears.
-param([int]$Lower = 0, [int]$Floor = 50)
+# With -Max, a level above it is brought down to it (and left alone otherwise).
+param([int]$Lower = 0, [int]$Floor = 50, [int]$Max = 0)
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -31,6 +32,10 @@ public static class JarvisMic {
 }
 '@
 $now = [math]::Round([JarvisMic]::Get() * 100)
+if ($Max -gt 0 -and $now -gt $Max) {
+  $now = $Max
+  [JarvisMic]::Set([float]($now / 100))
+}
 if ($Lower -gt 0 -and $now -gt $Floor) {
   $now = [math]::Max($Floor, $now - $Lower)
   [JarvisMic]::Set([float]($now / 100))

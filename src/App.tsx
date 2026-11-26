@@ -1263,7 +1263,25 @@ export default function App() {
       const phase = store.getState().phase
       if (phase === 'offline') {
         void powerOn()
-      } else if (phase === 'boot') {
+        return
+      }
+      // No internet: Chrome's recogniser cannot hear, so Space does what the
+      // mic button does offline — the bridge hands listening to the offline
+      // listener (Vosk), which chimes and sends what it heard. Online, as before.
+      void fetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store' })
+        .then((r) => r.json() as Promise<{ brain?: string }>)
+        .then((h) => h.brain === 'local')
+        .catch(() => false)
+        .then((offline) => {
+          if (offline) {
+            void fetch(`${BRIDGE_HTTP_URL}/popup/mic`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => undefined)
+            return
+          }
+          spaceTalk(store.getState().phase)
+        })
+    }
+    const spaceTalk = (phase: string) => {
+      if (phase === 'boot') {
         /* ignore — the boot sequence owns the phase until it finishes */
       } else if (
         phase === 'thinking' ||
