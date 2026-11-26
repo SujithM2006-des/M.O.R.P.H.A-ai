@@ -473,10 +473,11 @@ export function assistantServer({ allowWrites }) {
     alwaysLoad: true,
     tools: [
       tool(
-        'save_routine',
-        'Save a routine: a name the user can say to run several requests in one go ("study mode" -> ' +
+        'save_named_routine',
+        'Save a NAMED routine: a name the user can say to run several requests in one go ("study mode" -> ' +
           'close YouTube, open Notion, volume down). Each step is a request in plain words, run in order ' +
-          'whenever they say the name. Saving with an existing name replaces it.',
+          'whenever they say the name. Saving with an existing name replaces it. (For something done ' +
+          'by itself at a set time every day, use add_routine instead.)',
         {
           name: z.string().describe('What they will say to run it, e.g. "study mode".'),
           steps: z.array(z.string()).min(1).max(12).describe('Each request, in order, as the user would say it.'),
@@ -490,10 +491,10 @@ export function assistantServer({ allowWrites }) {
           }
         },
       ),
-      tool('list_routines', "The user's saved routines and their steps.", {}, async () => ({
+      tool('list_named_routines', "The user's named routines (said by name to run) and their steps.", {}, async () => ({
         content: [{ type: 'text', text: JSON.stringify(listRoutines().map((r) => ({ name: r.name, steps: r.steps }))) }],
       })),
-      tool('delete_routine', 'Delete a saved routine by its name.', { name: z.string() }, async ({ name }) => ({
+      tool('delete_named_routine', 'Delete a named routine by its name.', { name: z.string() }, async ({ name }) => ({
         content: [{ type: 'text', text: deleteRoutine(name) ? `Deleted "${name}".` : `No routine called "${name}".` }],
       })),
       tool(

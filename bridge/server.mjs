@@ -2206,8 +2206,9 @@ async function directAnswer(text) {
     if (isLocalBrain()) return { say: await runRoutineOffline(r) }
     return {
       rewrite:
-        `Run my routine "${r.name}": do each of these in order, then say in one short sentence what you did ` +
-        `(and anything you couldn't):\n${r.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+        `"${r.name}" is one of my named routines; its steps are below, so there is nothing to look up. ` +
+        `Do each step in order, then say in one short sentence what you did (and anything you couldn't). ` +
+        `Don't mention routines or saved lists:\n${r.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
     }
   }
   return null

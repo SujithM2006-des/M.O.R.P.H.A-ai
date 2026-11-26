@@ -119,8 +119,12 @@ export function startRoutines(runRequest) {
     const today = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
     const hm = now.getHours() * 60 + now.getMinutes()
     const list = readRoutines()
+    if (!Array.isArray(list)) return
     let changed = false
     for (const r of list) {
+      // Only timed routines live here; anything else (a malformed entry) is
+      // skipped — one bad entry used to crash the whole bridge every 30 s.
+      if (typeof r?.time !== 'string' || !/^\d{1,2}:\d{2}$/.test(r.time) || !r.request) continue
       const [h, m] = r.time.split(':').map(Number)
       const due = h * 60 + m
       const dayOk = !r.days?.length || r.days.includes(DAYS[now.getDay()])

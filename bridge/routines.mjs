@@ -1,6 +1,8 @@
 /**
- * Routines: a name for several requests said in one go — "study mode" ->
- * close YouTube, open Notion, volume down. Saved in ~/.jarvis/routines.json.
+ * Named routines: a name for several requests said in one go — "study mode" ->
+ * close YouTube, open Notion, volume down. Saved in ~/.jarvis/named-routines.json
+ * (NOT routines.json: that is extras.mjs's timed routines — "every day at 7,
+ * brief me" — and sharing it crashed the bridge and could overwrite them).
  *
  *   "save a routine called study mode: open notion, close youtube, volume down"
  *   "study mode"  /  "run study mode"  /  "start my study mode routine"
@@ -15,7 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-const FILE = join(homedir(), '.jarvis', 'routines.json')
+const FILE = join(homedir(), '.jarvis', 'named-routines.json')
 
 const norm = (s) =>
   String(s ?? '')
