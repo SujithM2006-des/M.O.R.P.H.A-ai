@@ -12,7 +12,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -103,6 +103,28 @@ export function stopOllama({ all = false } = {}) {
   }
   rmSync(PID_FILE, { force: true })
   if (pid || all) console.log('[jarvis] stopped Ollama')
+}
+
+/**
+ * Ollama's installer (and its updates) put "Ollama.lnk" in the Startup
+ * folder, so it ran all day from sign-in. JARVIS starts it when needed, so
+ * that shortcut is put aside — into ~/.jarvis/startup-off, never deleted (put
+ * it back there to have Ollama start with Windows again). Checked at every
+ * bridge start, in case an update brought it back.
+ */
+export function parkOllamaStartup() {
+  try {
+    const startup = join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+    const lnk = join(startup, 'Ollama.lnk')
+    if (!existsSync(lnk)) return false
+    const away = join(homedir(), '.jarvis', 'startup-off')
+    mkdirSync(away, { recursive: true })
+    renameSync(lnk, join(away, 'Ollama.lnk'))
+    console.log('[jarvis] Ollama no longer starts with Windows (JARVIS starts it when needed)')
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** True if a server JARVIS started is (thought to be) running. */

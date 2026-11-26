@@ -23,7 +23,7 @@ import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { pcServer, runPcTool } from './pc.mjs'
 import { offlineFileSteps } from './offline-files.mjs'
-import { ollamaIsOurs, startOllama, stopOllama } from './ollama.mjs'
+import { ollamaIsOurs, parkOllamaStartup, startOllama, stopOllama } from './ollama.mjs'
 import { UNDO_RE, lastChange, undoLast } from './undo.mjs'
 import { matchRoutine, routineCommand } from './routines.mjs'
 import { sendScheduled, showWhatsApp, whatsappServer } from './whatsapp.mjs'
@@ -2211,6 +2211,15 @@ async function runRoutineOffline(r) {
 async function directAnswer(text) {
   const plain = String(text ?? '').replace(/^\[.*?\]\s*/, '').trim()
   if (isStandby(plain)) return { say: 'Standing by.' }
+  // A thank-you or a "great" after he did something: a reply, not a request
+  // (offline, "excellent" went to the local model and sat thinking).
+  {
+    const t = plain.toLowerCase().replace(/^(?:(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+)/, '').replace(/[.!,]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (/^(?:thanks?(?: you)?(?: so much| a lot| jarvis)?|thank you jarvis|ty|cheers)$/.test(t)) return { say: "You're welcome." }
+    // Praise only: "okay" / "yes" / "sure" may be the answer to his question
+    // ("Close Chrome?") and must reach the model.
+    if (/^(?:excellent|awesome|good job|well done|nice work|great job|great work)(?: jarvis| thanks?| thank you)?$/.test(t)) return { say: 'Glad to help.' }
+  }
   // A blurred "what's the time now" ("last-ditch dead time now"): a short
   // phrase ending in "time now" is a time question.
   if (plain.split(/\s+/).length <= 6 && /\btime\s+(?:now|is it|please)[.?!]*$/i.test(plain)) {
@@ -2301,6 +2310,7 @@ function tendOllama() {
   }
 }
 tendOllama()
+parkOllamaStartup()
 // With JARVIS: the bridge exiting takes the Ollama it started with it.
 process.on('exit', () => stopOllama())
 
