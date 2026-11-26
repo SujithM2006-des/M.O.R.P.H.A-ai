@@ -335,6 +335,14 @@ html[data-theme-hue] #root .vg-cal-error { filter: hue-rotate(calc(-1 * var(--th
 /* Claude when not signed in: optional, not an error. */
 .su-acc-opt { color: #8fb4d6; font-size: 12.5px; padding: 3px 10px; border: 1px solid rgba(63, 182, 255, 0.3); border-radius: 999px; }
 /* No AI connected at all yet. */
+/* Check-up: one row per part, green tick or amber "!" with what to do. */
+.su-check { display: grid; gap: 10px; justify-items: start; margin-top: 8px; }
+.su-check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; width: 100%; }
+.su-check-list li { display: grid; gap: 2px; padding: 8px 12px; border-radius: 9px; border: 1px solid rgba(120, 200, 255, 0.18); background: rgba(10, 30, 50, 0.45); }
+.su-check-list li small { opacity: 0.75; }
+.su-check-ok b { color: #7ee2a8; }
+.su-check-bad { border-color: rgba(255, 190, 90, 0.45) !important; background: rgba(110, 70, 10, 0.25) !important; }
+.su-check-bad b { color: #ffd38a; }
 .su-acc-need { margin: 8px 0 0; padding: 8px 12px; border-radius: 9px; border: 1px solid rgba(255, 190, 90, 0.45); background: rgba(110, 70, 10, 0.25); color: #ffd38a; font-size: 13px; }
 .su-acc-off {
   background: none;

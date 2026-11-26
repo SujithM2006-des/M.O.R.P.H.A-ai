@@ -2374,6 +2374,63 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
   background: rgba(255, 90, 100, 0.12) !important;
 }
 .vg-acts-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Model usage, simple view: who is answering, and "Details" for the rest. */
+.vg-use-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2, var(--ink));
+}
+.vg-use-summary b { color: var(--accent); }
+.vg-use-more {
+  font-size: 11.5px;
+  color: var(--accent) !important;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--edge-hi);
+  white-space: nowrap;
+}
+/* Offline: what still works. */
+.vg-offline-card {
+  position: relative;
+  margin: 0 0 10px;
+  padding: 10px 34px 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 190, 90, 0.45);
+  background: rgba(110, 70, 10, 0.22);
+  color: #ffe2b0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.vg-offline-card b { color: #ffd38a; }
+.vg-offline-no { opacity: 0.75; }
+.vg-offline-card button {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: #ffd38a !important;
+  font-size: 16px;
+  line-height: 1;
+}
+.vg-keys { display: block; margin-top: 8px; font-size: 11.5px; opacity: 0.7; }
+.vg-keys kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--edge-hi);
+  font: inherit;
+  font-size: 11px;
+}
+.vg-acts-row button.vg-acts-undo {
+  width: auto;
+  padding: 0 10px;
+  margin-left: 6px;
+  font-size: 12px;
+  border: 1px solid var(--edge-hi);
+  color: var(--accent) !important;
+}
 .vg-acts-note {
   margin-left: 6px;
   font-size: 11.5px;

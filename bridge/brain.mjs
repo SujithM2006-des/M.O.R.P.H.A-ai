@@ -442,7 +442,8 @@ export async function quickCommand(said, run) {
   // Close an app.
   if ((m = t.match(/^(?:close|quit|exit)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:app|application|window))?$/i))) {
     if (sentence(m[1])) return null
-    return go('close_app', { name: m[1].trim() }, false)
+    // Said plainly by the user: that is the yes (pc.mjs asks first otherwise).
+    return go('close_app', { name: m[1].trim(), confirmed: true }, false)
   }
   // Zip: "zip the reports folder in downloads (to desktop)".
   if ((m = t.match(/^(?:zip|compress)\s+(?:up\s+)?(?:the\s+|my\s+)?(.+?)(?:\s+(?:folder|file|directory))?(?:\s+(?:in|from|on)\s+(?:the\s+|my\s+)?([^]+?))?(?:\s+(?:to|into|and save (?:it )?(?:to|in))\s+(?:the\s+|my\s+)?(.+))?$/i))) {

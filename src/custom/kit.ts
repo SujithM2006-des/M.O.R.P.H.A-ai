@@ -205,6 +205,8 @@ export type Profile = {
   orb: string
   /** Gmail, Calendar & Drive through the claude.ai account (off by default: costs usage). */
   connectors?: boolean
+  /** Ask before closing an app or sending a file to the Recycle Bin (on unless switched off). */
+  askFirst?: boolean
   features: Record<string, boolean>
   /** Who made JARVIS. Fixed in the code; not part of anyone's settings. */
   creator: string

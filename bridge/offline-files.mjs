@@ -16,6 +16,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
+import { lastUndoAt, recordChange } from './undo.mjs'
 
 const KNOWN = {
   downloads: 'Downloads', download: 'Downloads', documents: 'Documents', document: 'Documents', docs: 'Documents',
@@ -155,7 +156,7 @@ export function offlineFileSteps(text, opts = {}) {
   const key = String(text).toLowerCase().replace(/^\[.*?\]\s*/, '').replace(/[^a-z0-9]+/g, ' ').trim()
   const run = queue.then(async () => {
     const last = recent.get(key)
-    if (last && Date.now() - last.at < REPEAT_MS) return `That's already done: ${last.said.replace(/^Done: /, '')}`
+    if (last && Date.now() - last.at < REPEAT_MS && last.at > lastUndoAt()) return `That's already done: ${last.said.replace(/^Done: /, '')}`
     const said = await runSteps(text, opts)
     if (said) recent.set(key, { at: Date.now(), said })
     return said
@@ -217,13 +218,24 @@ async function runSteps(text, { open = async () => {}, home = homedir() } = {}) 
     }
   }
   if (held) return null // cut but never pasted: unclear what was wanted
-  // Do it.
+  // Do it (each change recorded, so "undo" can reverse it).
   const said = []
+  const changes = []
+  try {
+    await perform(todo, said, changes, open)
+  } finally {
+    recordChange(changes, said.join(', '))
+  }
+  return `Done: ${said.join(', ')}.`
+}
+
+async function perform(todo, said, changes, open) {
   for (const x of todo) {
     if (x.op === 'open') {
       await open(x.dir)
       said.push(`opened ${basename(x.dir)}`)
     } else if (x.op === 'mkdir') {
+      if (!existsSync(x.dir)) changes.push({ op: 'mkdir', to: x.dir })
       mkdirSync(x.dir, { recursive: true })
       said.push(`made the folder "${basename(x.dir)}"`)
     } else {
@@ -241,8 +253,8 @@ async function runSteps(text, { open = async () => {}, home = homedir() } = {}) 
           rmSync(x.src, { recursive: true, force: true })
         }
       }
+      changes.push(x.op === 'copy' ? { op: 'copy', to: dest } : { op: 'move', from: x.src, to: dest })
       said.push(`${x.op === 'copy' ? 'copied' : 'moved'} ${basename(x.src)} into "${basename(x.to)}"`)
     }
   }
-  return `Done: ${said.join(', ')}.`
 }

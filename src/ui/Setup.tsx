@@ -112,6 +112,9 @@ export function Setup() {
   // ChatGPT's sign-in has been looked at (even if the answer was "unknown",
   // with JARVIS's Chrome window closed): stop showing "Checking…".
   const [checked, setChecked] = useState(false)
+  // The check-up's results (null until run).
+  const [checkItems, setCheckItems] = useState<{ name: string; ok: boolean; note: string }[] | null>(null)
+  const [checking, setChecking] = useState(false)
   const [keyInput, setKeyInput] = useState<Record<string, string | null>>({})
   const [voices, setVoices] = useState<{ name: string; lang: string }[]>([])
   /** The voice picked for offline here ('' = unchanged). */
@@ -235,6 +238,18 @@ export function Setup() {
     setLeaving('')
   }
   const set = (patch: Partial<Profile>) => setForm({ ...form, ...patch })
+  const runCheckup = async () => {
+    setChecking(true)
+    try {
+      const r = await fetch(`${BRIDGE_HTTP_URL}/checkup`, { cache: 'no-store' })
+      if (r.ok) setCheckItems((await r.json()).items)
+      else setCheckItems([{ name: 'JARVIS', ok: false, note: `The check-up failed (${r.status}).` }])
+    } catch {
+      setCheckItems([{ name: 'JARVIS', ok: false, note: "JARVIS isn't running — start him, then check again." }])
+    } finally {
+      setChecking(false)
+    }
+  }
 
   // The same sentence for every voice, so they can be compared fairly.
   // Said as a word ("Jarvis"), never letter by letter.
@@ -610,6 +625,31 @@ export function Setup() {
                     : 'Through your Claude account — uses more of your Claude usage'}
                 </small>
               </label>
+              <label className={`su-feat ${form.askFirst !== false ? 'su-on' : ''}`}>
+                <input type="checkbox" checked={form.askFirst !== false} onChange={(e) => set({ askFirst: e.target.checked })} />
+                <b>Ask before closing or deleting</b>
+                <small>Closing an app or sending a file to the Recycle Bin waits for your yes (unless you asked plainly)</small>
+              </label>
+            </div>
+          </div>
+
+          <div className="su-field">
+            <span>Check-up</span>
+            <small>Microphone, internet, AI, offline model and the wake word listener — what's wrong and how to fix it. You can also say "health check".</small>
+            <div className="su-check">
+              <button type="button" className="su-ghost" disabled={checking} onClick={() => void runCheckup()}>
+                {checking ? 'Checking…' : 'Run check-up'}
+              </button>
+              {checkItems && (
+                <ul className="su-check-list">
+                  {checkItems.map((i) => (
+                    <li key={i.name} className={i.ok ? 'su-check-ok' : 'su-check-bad'}>
+                      <b>{i.ok ? '✓' : '!'} {i.name}</b>
+                      <small>{i.note}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 

@@ -20,6 +20,7 @@ import {
   useStatus,
   useBridgeUp,
   type JarvisPhase,
+  type LimitMeter,
   type StockPart,
   assistantTitle,
   openSetup,
@@ -612,6 +613,9 @@ function Written({ text }: { text: string }) {
   return <div ref={ref} className="vg-md" dangerouslySetInnerHTML={{ __html: html }} />
 }
 
+/** An answer reporting a file change JARVIS made — offered an Undo button. */
+const FILE_CHANGE = /\b(moved|copied|renamed|made the folder|created the folder|recycle bin)\b/i
+
 /**
  * Under a finished answer, on the left: copy, read aloud (again to stop),
  * thumbs up, thumbs down (with an optional "what was wrong?"), and retry
@@ -693,6 +697,12 @@ function AnswerActions({ turn, request, requestId, latest }: { turn: Turn; reque
         {latest && requestId && (
           <button type="button" title="Try again (a different answer)" aria-label="Retry" onClick={() => void retryAnswer(requestId, request)}>
             <Icon size={15}>{I.retry}</Icon>
+          </button>
+        )}
+        {/* A file change he just made (moved, copied, renamed, a new folder): undo it. */}
+        {latest && FILE_CHANGE.test(turn.text) && !/^(Undone|I couldn't undo|That was already undone|There's nothing)/.test(turn.text) && (
+          <button type="button" className="vg-acts-undo" title="Undo that file change" aria-label="Undo" onClick={() => void ask('undo')}>
+            Undo
           </button>
         )}
         {thanks && <span className="vg-acts-note">Thanks, noted.</span>}
@@ -839,6 +849,30 @@ const SUGGESTIONS = [
   'Any unread WhatsApp messages?',
 ]
 
+/**
+ * Offline (the local model answering): what still works, so nobody has to
+ * find out by asking. Closed with ×, back the next time he goes offline.
+ */
+function OfflineCard() {
+  const b = useBrains()
+  const offline = b?.active === 'local'
+  const [closed, setClosed] = useState(false)
+  useEffect(() => {
+    if (!offline) setClosed(false)
+  }, [offline])
+  if (!offline || closed) return null
+  return (
+    <div className="vg-offline-card" role="status">
+      <b>Offline — still works:</b> time and date, reminders and the calendar, battery, Wi-Fi, disk and CPU, opening and
+      closing apps, moving, copying and renaming files, new folders, your routines, undo and the health check.{' '}
+      <span className="vg-offline-no">Needs the internet: web search, news, weather, email, WhatsApp.</span>
+      <button type="button" aria-label="Close" title="Close" onClick={() => setClosed(true)}>
+        ×
+      </button>
+    </div>
+  )
+}
+
 function Conversation({ idle }: { idle: boolean }) {
   const { turns } = useJarvis()
   const ref = useRef<HTMLDivElement>(null)
@@ -857,9 +891,15 @@ function Conversation({ idle }: { idle: boolean }) {
   }, [turns, editing])
   return (
     <div className="vg-convo-wrap">
+      <OfflineCard />
       <div className="vg-convo" ref={ref}>
         {recent.length === 0 ? (
-          <div className="vg-convo-empty">Say “Hey Jarvis”, tap the mic, or type below.</div>
+          <div className="vg-convo-empty">
+            Say “Hey Jarvis”, tap the mic, or type below.
+            <small className="vg-keys">
+              <kbd>Space</kbd> talk · <kbd>Esc</kbd> stop · say “undo” to reverse a file change · “health check” if something seems off
+            </small>
+          </div>
         ) : (
           recent.map((t) => (
             <div key={t.id} className={`vg-msg vg-${t.role}`}>
@@ -1011,12 +1051,32 @@ function resets(at?: string | null): string | null {
 function ModelUsage({ i }: { i: number }) {
   const u = useUsage()
   const [range, setRange] = useState<'today' | 'week'>('today')
+  // Simple by default: who is answering and how much of its limit is used.
+  // Every meter, the tokens and the API-value estimate are under "Details".
+  const [details, setDetailsState] = useState(() => {
+    try {
+      return localStorage.getItem('jarvis-usage-details') === '1'
+    } catch {
+      return false
+    }
+  })
+  const setDetails = (v: boolean) => {
+    setDetailsState(v)
+    try {
+      localStorage.setItem('jarvis-usage-details', v ? '1' : '0')
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }
   const lines = u ? u[range] : {}
   const ids = u ? u.brains.options.map((o) => o.id).filter((id) => u.limits?.[id] || lines[id]) : []
   const sum = Object.values(lines).reduce(
     (a, l) => ({ requests: a.requests + l.requests, tokens: a.tokens + l.input + l.cached + l.output, cost: a.cost + l.cost }),
     { requests: 0, tokens: 0, cost: 0 },
   )
+  const fullest = (id: string) => (u?.limits?.[id]?.meters ?? []).reduce<LimitMeter | null>((a, m) => (!a || m.pct > a.pct ? m : a), null)
+  const active = u?.brains.active ?? null
+  const activeMeter = active ? fullest(active) : null
   return (
     <Panel
       title="Model Usage"
@@ -1037,6 +1097,21 @@ function ModelUsage({ i }: { i: number }) {
         <div className="vg-use-empty">Reading usage…</div>
       ) : (
         <>
+          <div className="vg-use-summary">
+            <span>
+              {active ? (
+                <>
+                  Using <b>{u.labels[active] ?? u.brains.activeLabel}</b>
+                  {activeMeter ? ` · ${activeMeter.pct}% of ${activeMeter.label.toLowerCase()} used` : ''}
+                </>
+              ) : (
+                'No AI available right now'
+              )}
+            </span>
+            <button type="button" className="vg-use-more" aria-expanded={details} onClick={() => setDetails(!details)}>
+              {details ? 'Less' : 'Details'}
+            </button>
+          </div>
           <ul className="vg-use-list">
             {ids.map((id) => {
               const lim = u.limits?.[id]
@@ -1051,7 +1126,7 @@ function ModelUsage({ i }: { i: number }) {
                     {resting && <em className="vg-use-tag vg-use-rest">resting</em>}
                     {lim?.note && <span className="vg-use-note">{lim.note}</span>}
                   </div>
-                  {lim?.meters.map((m) => {
+                  {(details ? lim?.meters ?? [] : [fullest(id)].filter((m): m is LimitMeter => Boolean(m))).map((m) => {
                     const when = resets(m.resetsAt)
                     return (
                       <div key={m.label} className={`vg-use-meter ${m.pct >= 90 ? 'vg-hot' : m.pct >= 70 ? 'vg-warm' : ''}`}>
@@ -1062,25 +1137,29 @@ function ModelUsage({ i }: { i: number }) {
                         <div className="vg-use-bar">
                           <span style={{ width: `${Math.max(m.pct, m.pct > 0 ? 1.5 : 0)}%` }} />
                         </div>
-                        {(when || m.detail) && <small>{[m.detail, when].filter(Boolean).join(' · ')}</small>}
+                        {details && (when || m.detail) && <small>{[m.detail, when].filter(Boolean).join(' · ')}</small>}
                       </div>
                     )
                   })}
+                  {details && (
                   <div className="vg-use-detail">
                     {l
                       ? `${l.requests} request${l.requests === 1 ? '' : 's'} · ${kmb(l.input + l.cached + l.output)} tokens ${range === 'today' ? 'today' : 'this week'}`
                       : `Not used ${range === 'today' ? 'today' : 'this week'}`}
                     {l && l.limits > 0 && ` · ${l.limits} limit hit${l.limits > 1 ? 's' : ''}`}
                   </div>
+                  )}
                 </li>
               )
             })}
           </ul>
-          <div className="vg-use-foot">
-            <span>{sum.requests} request{sum.requests === 1 ? '' : 's'}</span>
-            <span>{kmb(sum.tokens)} tokens</span>
-            {sum.cost > 0 && <span title="What these requests would cost on the paid API (estimate)">≈ ${sum.cost.toFixed(2)} API value</span>}
-          </div>
+          {details && (
+            <div className="vg-use-foot">
+              <span>{sum.requests} request{sum.requests === 1 ? '' : 's'}</span>
+              <span>{kmb(sum.tokens)} tokens</span>
+              {sum.cost > 0 && <span title="What these requests would cost on the paid API (estimate)">≈ ${sum.cost.toFixed(2)} API value</span>}
+            </div>
+          )}
         </>
       )}
     </Panel>

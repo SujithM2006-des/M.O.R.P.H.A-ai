@@ -268,6 +268,7 @@ export default function App() {
     const turnId = newId()
     let started = false
     let filled = false
+    const t0 = Date.now()
 
     try {
       const { text } = await ask(request, history.current, {
@@ -331,6 +332,16 @@ export default function App() {
       if (!gone() && !started && text) {
         store.getState().pushTurn({ id: turnId, role: 'jarvis', text }, sid)
         started = true
+      }
+
+      // A long job finished while the window was out of sight: say so with a
+      // Windows notification (not for quick answers — those would nag).
+      if (text && document.hidden && Date.now() - t0 > 20_000) {
+        void fetch(`${BRIDGE_HTTP_URL}/notify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Done', body: text.replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').slice(0, 180) }),
+        }).catch(() => undefined)
       }
 
       if (stale()) return

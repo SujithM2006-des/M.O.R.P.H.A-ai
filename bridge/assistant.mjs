@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { ps } from './pc.mjs'
 import { forgetHistory, searchHistory } from './journal.mjs'
 import { readProfile } from './profile.mjs'
+import { deleteRoutine, listRoutines, saveRoutine } from './routines.mjs'
 
 /**
  * JARVIS as a personal assistant: long-term memory, reminders and timers,
@@ -107,12 +108,17 @@ function nextRepeat(at, repeat) {
 
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c])
 
-/** A Windows toast notification that stays until dismissed. */
-export async function toast(title, body) {
-  const doc =
-    `<toast scenario="reminder"><visual><binding template="ToastGeneric"><text>${xml(title)}</text>` +
-    `<text>${xml(body)}</text></binding></visual><actions><action content="Dismiss" arguments="dismiss" ` +
-    `activationType="system"/></actions><audio src="ms-winsoundevent:Notification.Reminder"/></toast>`
+/**
+ * A Windows toast notification. A reminder (the default) stays until
+ * dismissed; `{ sticky: false }` is an ordinary one that slides away.
+ */
+export async function toast(title, body, { sticky = true } = {}) {
+  const doc = sticky
+    ? `<toast scenario="reminder"><visual><binding template="ToastGeneric"><text>${xml(title)}</text>` +
+      `<text>${xml(body)}</text></binding></visual><actions><action content="Dismiss" arguments="dismiss" ` +
+      `activationType="system"/></actions><audio src="ms-winsoundevent:Notification.Reminder"/></toast>`
+    : `<toast><visual><binding template="ToastGeneric"><text>${xml(title)}</text>` +
+      `<text>${xml(body)}</text></binding></visual></toast>`
   try {
     await ps(
       '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; ' +
@@ -466,6 +472,30 @@ export function assistantServer({ allowWrites }) {
     instructions: "The user's personal assistant: memory, reminders, timers, scheduled messages, weather.",
     alwaysLoad: true,
     tools: [
+      tool(
+        'save_routine',
+        'Save a routine: a name the user can say to run several requests in one go ("study mode" -> ' +
+          'close YouTube, open Notion, volume down). Each step is a request in plain words, run in order ' +
+          'whenever they say the name. Saving with an existing name replaces it.',
+        {
+          name: z.string().describe('What they will say to run it, e.g. "study mode".'),
+          steps: z.array(z.string()).min(1).max(12).describe('Each request, in order, as the user would say it.'),
+        },
+        async ({ name, steps }) => {
+          try {
+            const r = saveRoutine(name, steps)
+            return { content: [{ type: 'text', text: `Saved "${r.name}" (${r.steps.length} steps). Saying "${r.name}" runs it.` }] }
+          } catch (err) {
+            return { content: [{ type: 'text', text: err.message }], isError: true }
+          }
+        },
+      ),
+      tool('list_routines', "The user's saved routines and their steps.", {}, async () => ({
+        content: [{ type: 'text', text: JSON.stringify(listRoutines().map((r) => ({ name: r.name, steps: r.steps }))) }],
+      })),
+      tool('delete_routine', 'Delete a saved routine by its name.', { name: z.string() }, async ({ name }) => ({
+        content: [{ type: 'text', text: deleteRoutine(name) ? `Deleted "${name}".` : `No routine called "${name}".` }],
+      })),
       tool(
         'remember',
         'Save a fact about the user for every future conversation: names and who people are ' +

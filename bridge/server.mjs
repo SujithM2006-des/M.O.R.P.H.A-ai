@@ -23,6 +23,8 @@ import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { pcServer, runPcTool } from './pc.mjs'
 import { offlineFileSteps } from './offline-files.mjs'
+import { UNDO_RE, lastChange, undoLast } from './undo.mjs'
+import { matchRoutine, routineCommand } from './routines.mjs'
 import { sendScheduled, showWhatsApp, whatsappServer } from './whatsapp.mjs'
 import { openApp } from './pc.mjs'
 import { status as telemetry, statusReady as telemetryReady } from './telemetry.mjs'
@@ -361,7 +363,7 @@ const DOCK_APPS = {
   calculator: () => openApp('calculator'),
   notepad: () => openApp('notepad'),
 }
-import { addSchedule, assistantServer, memoryPrompt, removeSchedule, scheduleList, startScheduler } from './assistant.mjs'
+import { addSchedule, assistantServer, memoryPrompt, removeSchedule, scheduleList, startScheduler, toast } from './assistant.mjs'
 import { journalPrompt, record as recordExchange } from './journal.mjs'
 import { composeWithAttachments, prepareAttachments, tidyAttached } from './attachments.mjs'
 import { customizeServer } from './customize.mjs'
@@ -1455,6 +1457,27 @@ const handleRequest = async (req, res) => {
     res.writeHead(ok ? 200 : 500, { ...cors, 'content-type': 'application/json; charset=utf-8' })
     return res.end(JSON.stringify({ ok }))
   }
+  // A long job finished while the window was hidden: a Windows notification.
+  if (req.method === 'POST' && req.url === '/notify') {
+    const body = await readJson(req)
+    const who = readProfile().assistant || 'JARVIS'
+    void toast(`${who}: ${String(body.title ?? 'Done').slice(0, 60)}`, String(body.body ?? '').slice(0, 200), { sticky: false })
+    res.writeHead(202, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+    return res.end(JSON.stringify({ ok: true }))
+  }
+  // Setup's check-up: each part with ok / what to do.
+  if (req.method === 'GET' && req.url === '/checkup') {
+    const r = await checkup()
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify(r))
+  }
+  // Undo: GET says what the last file change was; POST reverses it.
+  if (req.url === '/undo' && (req.method === 'GET' || req.method === 'POST')) {
+    const body = req.method === 'POST' ? { said: await undoLast() } : { last: lastChange() }
+    if (body.said) console.log(`[jarvis] undo: ${body.said}`)
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify(body))
+  }
   // Setup's account list: which services are connected (no keys shown).
   // ?check=1 also looks at ChatGPT's sign-in in JARVIS's window (a few seconds).
   if (req.method === 'GET' && req.url.startsWith('/accounts')) {
@@ -2100,6 +2123,94 @@ function whenFrom(s) {
   if (!m[3] && d.getTime() < Date.now() && h < 12) d.setHours(h + 12)
   if (m[4] === 'tomorrow' || d.getTime() < Date.now()) d.setDate(d.getDate() + 1)
   return d
+}
+
+/**
+ * A check-up of everything that has gone wrong silently before: the mic muted
+ * or clipping at 100%, the wake listener not running, no internet, no offline
+ * model. Each item says what to do. Used by Setup's "Run check-up" and by
+ * "health check" said or typed.
+ */
+async function checkup() {
+  const items = []
+  const add = (name, ok, note) => items.push({ name, ok, note })
+  const st = brainState()
+  add('Internet', st.online, st.online ? 'Connected' : 'Offline — the PC answers what it can by itself')
+  const cur = currentBrain()
+  add('AI answering', Boolean(cur), cur ? PROVIDERS[cur]?.label ?? cur : whyNot() || 'None available — sign in to one in Setup')
+  add('Offline model', Boolean(st.model), st.model ? `${st.model} (Ollama)` : 'None — install Ollama and a model to answer without the internet')
+  add('Offline speech', existsSync(join(homedir(), '.jarvis', 'vosk', 'vosk-model-en-in-0.5')), 'Large English model for voice commands without the internet')
+  add('Microphone', !muted, muted ? 'Muted — tap the mic button to unmute' : 'On')
+  // The mic level and the background listener, in one PowerShell call.
+  const probe = await new Promise((resolve) => {
+    const script = join(SCRIPTS, 'mic-level.ps1').replace(/'/g, "''")
+    const cmd =
+      `try { $l = & '${script}' } catch { $l = '' }; ` +
+      "$w = @(Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -match 'wake_listener' }).Count; " +
+      '"$l|$w"'
+    const p = spawnProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', cmd], { windowsHide: true })
+    let out = ''
+    p.stdout.on('data', (d) => (out += d))
+    const timer = setTimeout(() => p.kill(), 20_000)
+    p.on('close', () => {
+      clearTimeout(timer)
+      const [level, listeners] = out.trim().split('|')
+      resolve({ level: Number.parseInt(level, 10), listeners: Number.parseInt(listeners, 10) })
+    })
+    p.on('error', () => resolve({}))
+  })
+  if (Number.isFinite(probe.level)) {
+    const hot = probe.level >= 95
+    add('Microphone level', !hot, hot ? `${probe.level}% — too high, speech clips and is misheard; set it to about 75% in Windows sound settings` : `${probe.level}%`)
+  }
+  if (Number.isFinite(probe.listeners)) {
+    add('Wake word listener', probe.listeners > 0, probe.listeners > 0 ? 'Running' : 'Not running — restart JARVIS (it starts with him)')
+  }
+  const k = maskedKeys()
+  const free = ['gemini', 'openrouter', 'groq'].filter((p) => k[p])
+  add('Free AI accounts', free.length > 0, free.length ? free.map((p) => PROVIDERS[p]?.label ?? p).join(', ') : 'None — sign in to Gemini or OpenRouter in Setup')
+  const bad = items.filter((i) => !i.ok)
+  const summary = bad.length
+    ? `${bad.length} thing${bad.length === 1 ? '' : 's'} to look at: ${bad.map((i) => `${i.name.toLowerCase()} — ${i.note}`).join('; ')}.`
+    : 'Everything looks good: internet, AI, offline model, microphone and the wake word listener.'
+  return { items, summary }
+}
+
+const CHECKUP_RE = /^(?:(?:hey |ok |okay )?(?:jarvis|j\.a\.r\.v\.i\.s\.?)[,\s]+)?(?:please\s+)?(?:run\s+(?:a\s+)?|do\s+(?:a\s+)?)?(?:health\s*check|check[- ]?up|self[- ]?check|diagnostics?|check yourself|diagnose yourself|are you (?:working|ok|okay)(?: properly)?|is everything (?:working|ok|okay))[.!?]*$/i
+
+/** A routine's steps, offline: each through the same no-model shortcuts. */
+async function runRoutineOffline(r) {
+  const out = []
+  for (const step of r.steps) {
+    let said = quickAnswer(step) || (await offlineQuick(step).catch(() => null))
+    if (!said) said = await offlineFileSteps(step, { open: (p) => runPcTool('open_folder', { path: p }) }).catch(() => null)
+    if (!said) said = (await quickCommand(step, runPcTool).catch(() => null))?.say
+    out.push(said ? said.replace(/\.$/, '') : `couldn't do "${step}" offline`)
+  }
+  return `${r.name}: ${out.join('; ')}.`
+}
+
+/**
+ * Requests answered without any model, online or offline: undo, the
+ * check-up, and routines (save / list / delete / run). Returns
+ * { say } to answer, { rewrite } to hand a routine to the model, or null.
+ */
+async function directAnswer(text) {
+  const plain = String(text ?? '').replace(/^\[.*?\]\s*/, '').trim()
+  if (UNDO_RE.test(plain)) return { say: await undoLast(), tool: 'undo_last_change' }
+  if (CHECKUP_RE.test(plain)) return { say: (await checkup()).summary }
+  const said = routineCommand(plain)
+  if (said) return { say: said }
+  const r = matchRoutine(plain)
+  if (r) {
+    if (isLocalBrain()) return { say: await runRoutineOffline(r) }
+    return {
+      rewrite:
+        `Run my routine "${r.name}": do each of these in order, then say in one short sentence what you did ` +
+        `(and anything you couldn't):\n${r.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+    }
+  }
+  return null
 }
 
 async function offlineQuick(text) {
@@ -3006,6 +3117,20 @@ wss.on('connection', (socket) => {
         lastAsk = text
         void settling.then(async () => {
           answering = id
+          // Undo, the check-up and routines: answered here on every AI and
+          // offline alike — instant, and the same every time.
+          const direct = await directAnswer(text).catch((err) => {
+            console.log(`[jarvis] direct answer failed: ${err.message}`)
+            return null
+          })
+          if (direct?.say) {
+            console.log(`[jarvis] direct: ${direct.say.slice(0, 160)}`)
+            if (direct.tool) sendTurn({ type: 'tool', name: `mcp__jarvis_pc__${direct.tool}` })
+            sendTurn({ type: 'text', delta: direct.say })
+            sendTurn({ type: 'done', text: direct.say })
+            return
+          }
+          if (direct?.rewrite) text = /^\[Chat\]/.test(text) ? `[Chat] ${direct.rewrite}` : direct.rewrite
           // Offline, plain requests need no model: the time and date, and basic
           // PC jobs (open/close an app or folder, zip, copy, move, rename, new
           // folder, volume) run straight away instead of after tens of seconds
