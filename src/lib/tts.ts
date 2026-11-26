@@ -595,22 +595,31 @@ function voiceChain(ctx: AudioContext): AudioNode {
   air.type = 'highshelf'
   air.frequency.value = 8000
   air.gain.value = 2
+  // Louder than before (users found him too quiet): evened out a little more,
+  // then raised well above unity, with a limiter last so the peaks can't clip.
   const comp = ctx.createDynamicsCompressor()
-  comp.threshold.value = -20
+  comp.threshold.value = -24
   comp.knee.value = 8
-  comp.ratio.value = 3
+  comp.ratio.value = 4
   comp.attack.value = 0.004
   comp.release.value = 0.18
   const dry = ctx.createGain()
-  dry.gain.value = 0.92
+  dry.gain.value = 1.8
   const room = ctx.createConvolver()
   room.buffer = roomImpulse(ctx, 0.35, 3.2)
   const wet = ctx.createGain()
-  wet.gain.value = 0.14
+  wet.gain.value = 0.1
+  const limiter = ctx.createDynamicsCompressor()
+  limiter.threshold.value = -2
+  limiter.knee.value = 0
+  limiter.ratio.value = 20
+  limiter.attack.value = 0.001
+  limiter.release.value = 0.08
 
   input.connect(hp).connect(presence).connect(air).connect(comp)
-  comp.connect(dry).connect(ctx.destination)
-  comp.connect(room).connect(wet).connect(ctx.destination)
+  comp.connect(dry).connect(limiter)
+  comp.connect(room).connect(wet).connect(limiter)
+  limiter.connect(ctx.destination)
   return input
 }
 

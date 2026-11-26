@@ -89,6 +89,19 @@ async function refreshWeather() {
   }
 }
 
+/**
+ * status(), but waiting (up to 8 s) for the first battery / Wi-Fi / disk
+ * reading when there isn't one yet — just after start-up, "what is my battery
+ * level" otherwise had nothing to answer with.
+ */
+export async function statusReady() {
+  if (!slow.at) {
+    void refreshSlow()
+    for (let i = 0; i < 40 && !slow.at; i++) await new Promise((r) => setTimeout(r, 200))
+  }
+  return status()
+}
+
 export function status() {
   void refreshSlow()
   void refreshWeather()

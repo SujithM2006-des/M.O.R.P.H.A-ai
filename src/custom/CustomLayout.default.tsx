@@ -1089,11 +1089,12 @@ function ModelUsage({ i }: { i: number }) {
 
 /**
  * The one mic button (the same in the popup):
- *   tap  — listen; tapped again while listening, standby.
- *   hold — (0.7 s, a ring fills) mute the microphone; held again, unmute.
+ *   tap  — listen (unmuting first if muted); tapped again while listening, standby.
+ *   hold — (1.5 s, a ring fills) mute the microphone; held again, unmute.
  * Red with a slash while muted. Keyboard: Enter/Space tap; Shift+Enter mutes.
+ * 1.5 s, not 0.7: people press and hold while they talk, and that muted him.
  */
-const HOLD_MS = 700
+const HOLD_MS = 1500
 /**
  * Copy a written answer: formatted (HTML) for Word, Docs and mail, and plain
  * text without the markdown symbols for WhatsApp, Notepad and the like — each
@@ -1170,10 +1171,10 @@ function MicButton({ muted, listening }: { muted: boolean; listening: boolean })
       className={`vg-mic ${muted ? 'vg-muted' : ''} ${holding ? 'vg-holding' : ''}`}
       title={
         muted
-          ? 'Microphone muted — hold to unmute'
+          ? 'Microphone muted — tap to unmute and talk'
           : `${listening ? 'Tap: stand by' : 'Tap: talk to JARVIS'} · Hold: mute the microphone`
       }
-      aria-label={muted ? 'Microphone muted. Hold to unmute.' : listening ? 'Stand by (hold to mute)' : 'Talk (hold to mute)'}
+      aria-label={muted ? 'Microphone muted. Tap to unmute and talk.' : listening ? 'Stand by (hold to mute)' : 'Talk (hold to mute)'}
       aria-pressed={muted}
       style={{ '--hold': `${HOLD_MS}ms` } as CSSProperties}
       onPointerDown={(e) => {
@@ -1344,7 +1345,7 @@ function AskBar() {
         // Screen readers don't read the grey hint as the box's name.
         aria-label="Ask Jarvis"
         value={text}
-        placeholder={muted ? 'Microphone muted — type here, or hold the mic to unmute' : listening ? caption || 'Listening…' : inChat ? 'Reply…  (Shift+Enter for a new line)' : 'Ask me anything…'}
+        placeholder={muted ? 'Microphone muted — type here, or tap the mic to talk' : listening ? caption || 'Listening…' : inChat ? 'Reply…  (Shift+Enter for a new line)' : 'Ask me anything…'}
         onChange={(e) => {
           setText(e.target.value)
           // Typing over a recalled request makes it the new draft.

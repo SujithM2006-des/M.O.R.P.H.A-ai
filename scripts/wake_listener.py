@@ -27,8 +27,10 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -243,20 +245,127 @@ def load_big_model():
     threading.Thread(target=work, daemon=True).start()
 
 
-def offline_capture(stream, vosk_model, why):
-    """Offline: beep (the cue to speak), hear the command with Vosk, and hand
-    it to JARVIS. For "Hey Jarvis" and for the mic button alike. Uses the big
-    model when it is loaded, the small one until then."""
+def tones(*notes):
+    """Short beeps: (frequency, ms) each. Best effort."""
     try:
         import winsound
-        winsound.Beep(880, 120)
+
+        for f, ms in notes:
+            winsound.Beep(f, ms)
     except Exception:
         pass
-    said = capture_command(stream, BIG["model"] or vosk_model, limit=12.0, quiet=1.5, save=False)
+
+
+def notify_async(title, body):
+    """A Windows notification without holding up the listening (it takes ~1 s)."""
+    threading.Thread(target=lambda: toast(title, body), daemon=True).start()
+
+
+def command_after_name(text):
+    """What followed his name in one breath ("hey jarvis what's my battery
+    level" -> "what's my battery level"); "" if nothing did."""
+    words = text.split()
+    names = [n.split() for n in wake_names()]
+    for i in range(len(words) - 1, -1, -1):
+        for n in names:
+            if words[i : i + len(n)] == n:
+                return " ".join(words[i + len(n) :]).strip()
+    return ""
+
+
+# Everyday offline commands. Heard against this list as well as free-form: a
+# restricted grammar snaps a slightly blurred phrase onto the nearest real
+# command, where free-form gave "what split them know" for "what's the time
+# now". Used only when Vosk is sure; anything else stays free-form.
+COMMANDS = [
+    "what time is it", "what is the time", "what is the time now", "tell me the time", "time now",
+    "what is the date", "what is the date today", "what day is it", "what day is it today",
+    "what is my battery level", "what is the battery level", "how much battery do i have", "battery status", "battery level",
+    "how much free space do i have", "how much storage do i have", "disk space",
+    "what is on my calendar", "what are my reminders", "any reminders", "my schedule",
+    "open chrome", "open google chrome", "open notepad", "open calculator", "open settings", "open spotify",
+    "open whatsapp", "open file explorer", "open explorer", "open terminal", "open visual studio code", "open vs code",
+    "open downloads", "open the downloads folder", "open documents", "open the documents folder", "open desktop",
+    "open pictures", "open music", "open videos",
+    "close chrome", "close notepad", "close calculator", "close spotify",
+    "turn the volume up", "turn the volume down", "volume up", "volume down", "louder", "quieter",
+    "mute", "unmute", "pause", "play", "next song", "previous song",
+    "lock the computer", "lock my computer", "lock the pc", "lock my pc", "lock the screen",
+    "what is my cpu usage", "what is my memory usage", "am i connected to the internet", "which wifi am i on",
+    "what is my system status", "what is the system status", "system status", "how is my laptop doing",
+    "how is my computer doing", "how is my pc doing",
+    "go to standby", "stop", "cancel", "never mind",
+]
+
+
+def grammar_command(model, pcm, with_wake=False):
+    """The command in `pcm` if it is one of COMMANDS and Vosk is sure (every
+    word heard with confidence ≥ 0.8); "" otherwise. `with_wake`: the audio
+    may start with his name ("hey jarvis what time is it")."""
+    from vosk import KaldiRecognizer
+
+    phrases = list(COMMANDS)
+    if with_wake:
+        wakes = [f"{g} {n}" for n in wake_names() for g in GREETINGS] + wake_names()
+        phrases += [f"{w} {c}" for w in wakes for c in COMMANDS]
+    rec = KaldiRecognizer(model, RATE, json.dumps(phrases + ["[unk]"]))
+    rec.SetWords(True)
+    words = []
+    for i in range(0, len(pcm), 8000):
+        if rec.AcceptWaveform(pcm[i : i + 8000]):
+            words += json.loads(rec.Result()).get("result", [])
+    words += json.loads(rec.FinalResult()).get("result", [])
+    words = [w for w in words if w.get("word") != "[unk]"]
+    # 0.6: with a distorted (clipping) mic the right command came back at
+    # 0.6-0.8; unrelated speech falls into [unk] rather than a command.
+    if not words or min(w.get("conf", 0) for w in words) < 0.6:
+        return ""
+    text = " ".join(w["word"] for w in words)
+    if with_wake:
+        after = command_after_name(text)
+        text = after or text
+    return text if text in COMMANDS else ""
+
+
+def transcribe(model, pcm):
+    from vosk import KaldiRecognizer
+
+    rec = KaldiRecognizer(model, RATE)
+    parts = []
+    for i in range(0, len(pcm), 8000):
+        if rec.AcceptWaveform(pcm[i : i + 8000]):
+            parts.append(json.loads(rec.Result()).get("text", ""))
+    parts.append(json.loads(rec.FinalResult()).get("text", ""))
+    return " ".join(p for p in parts if p).strip()
+
+
+def offline_capture(stream, vosk_model, why, recent=None):
+    """Offline: hear the command with Vosk and hand it to JARVIS. For "Hey
+    Jarvis" and for the mic button alike. Uses the big model when it is
+    loaded, the small one until then.
+
+    Said in one breath ("hey jarvis, what's my battery level"), the command is
+    already in `recent` — the last few seconds of audio — because the phrase
+    is only recognised once the speaker stops: listening *after* it heard
+    nothing (measured: "nothing heard" three times in a row). Otherwise a
+    two-tone chime and a notification say he is listening, and he waits."""
+    model = BIG["model"] or vosk_model
+    if recent:
+        pcm = b"".join(recent)
+        said = grammar_command(model, pcm, with_wake=True) or command_after_name(transcribe(model, pcm))
+        if len(said.split()) >= 2:
+            tones((880, 90), (1320, 110))
+            ok = ask_bridge(said)
+            log(f'offline command ({why}, same breath): "{said}"' + ("" if ok else " (could not reach JARVIS)"))
+            return
+    tones((880, 90), (1320, 110))
+    notify_async("Listening (offline)", "Say your command now.")
+    said = capture_command(stream, model, limit=14.0, quiet=1.5, save=False)
     if said:
         ok = ask_bridge(said)
         log(f'offline command ({why}): "{said}"' + ("" if ok else " (could not reach JARVIS)"))
     else:
+        tones((440, 220))  # nothing heard: try again
         log(f"offline ({why}): nothing heard (loudest {CAPTURE['loudest']})")
 
 
@@ -277,6 +386,7 @@ def capture_command(stream, vosk_model, limit=8.0, quiet=1.3, save=True):
     # natural pause before the command ("nothing heard", measured offline).
     settle = 0.7
     CAPTURE["loudest"] = 0
+    captured = []  # the command's audio, for the everyday-command check
     while time.monotonic() - start < limit:
         if stream.read_available < CHUNK:
             time.sleep(0.02)
@@ -284,22 +394,37 @@ def capture_command(stream, vosk_model, limit=8.0, quiet=1.3, save=True):
         audio, _ = stream.read(CHUNK)
         if time.monotonic() - start < settle:
             continue  # the wake phrase's own tail: not part of the command
+        captured.append(audio.tobytes())
         peak = int(np.abs(audio).max())
         CAPTURE["loudest"] = max(CAPTURE["loudest"], peak)
-        if peak > 1500:
+        # 1000, not 1500: a normal voice a little way from the laptop peaked
+        # around 1,000-1,800 here and was taken for silence.
+        if peak > 1000:
             heard_at = time.monotonic()
         if rec.AcceptWaveform(audio.tobytes()):
             parts.append(json.loads(rec.Result()).get("text", ""))
         if heard_at and time.monotonic() - heard_at > quiet:
             break
-        if not heard_at and time.monotonic() - start > (5.5 if not save else 3.5):
+        # Offline, 8 s to start speaking (people wait for the chime, then think).
+        if not heard_at and time.monotonic() - start > (8.0 if not save else 3.5):
             break  # nothing said after his name: he will just listen
     parts.append(json.loads(rec.FinalResult()).get("text", ""))
     text = " ".join(p for p in parts if p).strip()
-    # Strip a repeated wake phrase the recogniser may have caught again.
-    for lead in ("hey jarvis", "jarvis"):
+    # An everyday command heard clearly against the list beats a blurred
+    # free-form reading of it.
+    if captured:
+        sure = grammar_command(vosk_model, b"".join(captured))
+        if sure:
+            if sure != text:
+                log(f'everyday command "{sure}" (free-form heard "{text}")')
+            text = sure
+    # Strip a repeated wake phrase the recogniser may have caught again
+    # ("hello friday", "friday", "hey jarvis" …).
+    leads = sorted({f"{g} {n}" for n in wake_names() for g in GREETINGS} | set(wake_names()), key=len, reverse=True)
+    for lead in leads:
         if text.startswith(lead):
             text = text[len(lead):].strip()
+            break
     if not save:
         return text
     if len(text.split()) >= 2:
@@ -320,6 +445,52 @@ def start_jarvis():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+GREETINGS = ("hey", "hi", "hello", "ok", "okay")
+
+
+def assistant_name():
+    """The assistant's name from setup ("Friday", "J.A.R.V.I.S" -> "jarvis"),
+    lower case, as it is said."""
+    try:
+        raw = json.loads((HOME / "profile.json").read_text(encoding="utf-8-sig")).get("assistant") or ""
+    except (OSError, ValueError):
+        raw = ""
+    name = " ".join(raw.replace(".", "").lower().split())
+    return name or "jarvis"
+
+
+def wake_names():
+    """The names he answers to: the one from setup, and "jarvis" always (the
+    openWakeWord model only knows "Hey Jarvis", so it stays an alias)."""
+    name = assistant_name()
+    return [name] if name == "jarvis" else [name, "jarvis"]
+
+
+def wake_grammar(names):
+    """Vosk phrases: a greeting and the name ("hey friday", "hello friday"),
+    or the name alone. Anything else falls into [unk]."""
+    phrases = [f"{g} {n}" for n in names for g in GREETINGS] + list(names)
+    return json.dumps(phrases + ["[unk]"])
+
+
+def heard_wake(result, names, offline):
+    """Did this finished Vosk result call him? With a greeting in front, yes.
+    The name alone only when it was the whole utterance and Vosk was sure:
+    restricted to a tiny grammar, Vosk forces near-misses onto the nearest
+    phrase ("go to stand by" became "jarvis" six times a minute), and the
+    confidence is what tells a real "Friday" from a forced one. Offline (this
+    listener is the only way in) a lone name is enough."""
+    text = result.get("text", "")
+    if any(f"{g} {n}" in text for n in names for g in GREETINGS):
+        return True
+    if text in names:
+        if offline:
+            return True
+        words = result.get("result") or []
+        return bool(words) and min(w.get("conf", 0) for w in words) >= 0.85
+    return False
 
 
 def main():
@@ -346,12 +517,22 @@ def main():
 
             SetLogLevel(-1)
             vosk_model = VoskModel(str(vosk_dir))
-            vosk_rec = KaldiRecognizer(
-                vosk_model, RATE, json.dumps(["hey jarvis", "hi jarvis", "ok jarvis", "okay jarvis", "jarvis", "[unk]"])
-            )
         except Exception as err:
             log(f"Vosk unavailable, using openWakeWord alone: {err}")
-    log(f"ready (threshold {args.threshold}, Vosk {'on' if vosk_rec else 'off'})")
+    names = wake_names()
+    last_names_check = time.monotonic()
+
+    def make_rec():
+        # The name from setup: "hey/hi/hello/ok <name>", or the name alone.
+        from vosk import KaldiRecognizer
+
+        rec = KaldiRecognizer(vosk_model, RATE, wake_grammar(names))
+        rec.SetWords(True)  # word confidences, for the name said alone
+        return rec
+
+    if vosk_model is not None:
+        vosk_rec = make_rec()
+    log(f"ready (threshold {args.threshold}, Vosk {'on' if vosk_rec else 'off'}, answers to: {', '.join(names)})")
 
     stream = None
     last_fire = 0.0  # last time the phrase was acted on at all
@@ -364,6 +545,7 @@ def main():
 
     paused = False
     last_mute_check = 0.0
+    recent = deque(maxlen=100)  # 100 x 80 ms = the last 8 s of audio
     while True:
         try:
             # The kill switch (desktop shortcut, scripts/jarvis-switch.ps1).
@@ -400,6 +582,15 @@ def main():
                 last_check = 0.0
 
             now = time.monotonic()
+            # A new name saved in setup: listen for it within ten seconds.
+            if now - last_names_check > 10:
+                last_names_check = now
+                fresh_names = wake_names()
+                if fresh_names != names:
+                    names = fresh_names
+                    if vosk_model is not None:
+                        vosk_rec = make_rec()
+                    log(f"now answers to: {', '.join(names)}")
             if now - last_check > 3:
                 last_check = now
                 up, clients = bridge()
@@ -462,6 +653,8 @@ def main():
                 continue
             audio, _ = stream.read(CHUNK)
             last_data = now
+            # The last 8 s, for a command said in the same breath as his name.
+            recent.append(audio.tobytes())
             peak = int(np.abs(audio).max())
             if peak > 0:
                 last_sound = now
@@ -497,13 +690,14 @@ def main():
             vosk_heard = False
             if vosk_rec is not None:
                 if vosk_rec.AcceptWaveform(audio.tobytes()):
-                    got = json.loads(vosk_rec.Result()).get("text", "")
-                    vosk_heard = ("jarvis" in got) if offline else ("hey jarvis" in got)
+                    got = json.loads(vosk_rec.Result())
+                    vosk_heard = heard_wake(got, names, offline)
+                    if vosk_heard:
+                        log(f'Vosk caught "{got.get("text", "")}"')
             if score < threshold and not vosk_heard:
                 continue
             if vosk_heard and score < threshold:
                 score = 1.0  # for the log: it was Vosk that caught it
-                log('Vosk caught "Hey Jarvis"')
 
             # One utterance spans several 80 ms frames: count it once.
             if time.monotonic() - last_fire < 2:
@@ -521,7 +715,8 @@ def main():
             # hand it over as a typed request.
             if vosk_model is not None and brain_mode() == "local":
                 log(f'heard "Hey Jarvis" ({score:.2f}) - offline, listening here')
-                offline_capture(stream, vosk_model, "wake phrase")
+                offline_capture(stream, vosk_model, "wake phrase", recent=list(recent))
+                recent.clear()
                 model.reset()
                 last_data = last_sound = time.monotonic()
                 continue

@@ -15,7 +15,12 @@ export async function getMic(): Promise<MediaStream> {
     audio: {
       echoCancellation: true,
       noiseSuppression: true,
-      autoGainControl: true,
+      // Off: on Windows, Chrome's gain control turns the *system* microphone
+      // level up (back to 100% after it was set to 75%), and the voice then
+      // clips — measured peaks of 32,5xx of 32,767 — which garbles every
+      // transcript, worst of all the offline one (the wake listener shares
+      // that level).
+      autoGainControl: false,
     },
   })
   return stream

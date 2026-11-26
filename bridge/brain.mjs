@@ -17,7 +17,11 @@ import { join } from 'node:path'
 
 export const OLLAMA_URL = process.env.JARVIS_OLLAMA_URL ?? 'http://127.0.0.1:11434'
 
-/** Local models in order of preference: fastest capable one first. */
+/**
+ * Local models in order of preference: fastest capable one first. (Tried the
+ * 8B first on a 6 GB laptop GPU: no answer within two minutes to a question
+ * needing tools, so the 4B stays first. JARVIS_OFFLINE_MODEL overrides.)
+ */
 const PREFERRED = [
   process.env.JARVIS_OFFLINE_MODEL,
   'qwen3:4b-instruct',
@@ -238,6 +242,10 @@ export function unavailable(id) {
  */
 export function currentBrain() {
   const choice = readChoice()
+  // No internet: only the model on this PC can answer, whatever is picked —
+  // so voice commands keep working offline. The pick applies again as soon
+  // as the internet is back.
+  if (!state.online) return state.model ? 'local' : null
   if (choice !== 'auto') return choice
   return ORDER.find((id) => !unavailable(id) && !isExhausted(id)) ?? ORDER.find((id) => !unavailable(id)) ?? null
 }
@@ -253,6 +261,8 @@ export function restingFor(id) {
  */
 export function whyNot() {
   const id = readChoice()
+  // Offline the local model answers whatever is picked (see currentBrain).
+  if (!state.online) return state.model ? '' : "The internet is down and there's no local model installed on this PC, so I can't think until it's back."
   if (id === 'auto') return ''
   const label = PROVIDERS[id]?.label ?? id
   const why = unavailable(id)

@@ -91,10 +91,37 @@ const NAME_STRICT =
  */
 const NAME_LOOSE = '(?:j|g|ch|dj|h|d|tr|sh)[aeo]{1,2}r?\\s?[vb][iyea]{1,2}s{0,2}'
 
-const WAKE = new RegExp(
-  `\\b(?:(?:hey|hi|ok|okay|yo)[\\s,]+${NAME_LOOSE}|(?:(?:hey|hi|ok|okay|yo)[\\s,]*)?(?:${NAME_STRICT}))\\b(?!'s)`,
-  'i',
-)
+/** Greetings that may come before his name: "hey", "hello", "hi" … */
+const GREET = '(?:hey|hi|hello|ok|okay|yo)'
+
+/**
+ * The wake pattern for a name. The name from setup ("Friday", "Mr Bean") is
+ * matched as said — with a greeting in front or alone — and "Jarvis" always
+ * stays an alias: the background listener's built-in model only knows "Hey
+ * Jarvis", and the loose spellings above are what make it work with an accent.
+ */
+function wakeFor(name: string): RegExp {
+  const n = String(name ?? '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  const own = n && n !== 'jarvis' ? n.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s-]?') : ''
+  const strict = own ? `${own}|${NAME_STRICT}` : NAME_STRICT
+  const loose = own ? `${own}|${NAME_LOOSE}` : NAME_LOOSE
+  return new RegExp(`\\b(?:${GREET}[\\s,]+(?:${loose})|(?:${GREET}[\\s,]*)?(?:${strict}))\\b(?!'s)`, 'i')
+}
+
+let WAKE = wakeFor('jarvis')
+
+/**
+ * Answer to the assistant's name from setup: "hey <name>", "hello <name>",
+ * or just "<name>". Called with the profile's name when it loads or changes.
+ */
+export function setWakeName(name: string | null | undefined) {
+  WAKE = wakeFor(name ?? 'jarvis')
+  const n = String(name ?? '').replace(/\./g, '').trim().toLowerCase()
+  OVERRIDE = new RegExp(
+    `\\b(stop|wait|jarvis${n && n !== 'jarvis' ? '|' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : ''}|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\\b`,
+    'i',
+  )
+}
 
 /**
  * Recogniser language. en-GB suits a British accent; anyone else is heard far
@@ -301,7 +328,7 @@ const norm = (s: string) =>
  * he happens to be saying. Suppressing "stop" because he just said "stop"
  * would be the single most infuriating failure this file could have.
  */
-const OVERRIDE =
+let OVERRIDE =
   /\b(stop|wait|jarvis|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\b/i
 
 /**
@@ -843,7 +870,19 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     openIndex = -1
     openWords = 0
     for (let i = Math.max(e.resultIndex, consumed); i < e.results.length; i++) {
-      const raw = e.results[i][0].transcript as string
+      // Chrome's best guess, unless only a later one has his name in it: with
+      // an Indian accent "say hey Jarvis" came back first as "say daily VIP",
+      // and the right reading was further down the list.
+      let raw = e.results[i][0].transcript as string
+      if (!WAKE.test(raw)) {
+        for (let k = 1; k < e.results[i].length; k++) {
+          const alt = e.results[i][k]?.transcript as string | undefined
+          if (alt && WAKE.test(alt)) {
+            raw = alt
+            break
+          }
+        }
+      }
       let chunk = raw
       if (i === cutIndex && cutWords) {
         const rest = words(raw).slice(cutWords).join(' ')
@@ -967,6 +1006,8 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     rec.continuous = true
     rec.interimResults = true
     rec.lang = SPEECH_LANG
+    // Several guesses per phrase, so his name is found when it isn't Chrome's first.
+    rec.maxAlternatives = 4
     rec.onstart = () => {
       // A fresh session numbers its results from zero again.
       consumed = 0

@@ -22,9 +22,10 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { pcServer, runPcTool } from './pc.mjs'
+import { offlineFileSteps } from './offline-files.mjs'
 import { sendScheduled, showWhatsApp, whatsappServer } from './whatsapp.mjs'
 import { openApp } from './pc.mjs'
-import { status as telemetry } from './telemetry.mjs'
+import { status as telemetry, statusReady as telemetryReady } from './telemetry.mjs'
 import { spawn as spawnProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
@@ -1554,11 +1555,10 @@ const handleRequest = async (req, res) => {
   // The popup's mic button: listen now, or — if already listening — standby.
   // Tapped while muted, it unmutes first: that is plainly what is wanted.
   if (req.method === 'POST' && req.url === '/popup/mic') {
-    // A tap while muted stays muted: holding the mic is what unmutes it.
-    if (muted) {
-      res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
-      return res.end(JSON.stringify({ sent: 0, muted: true }))
-    }
+    // A tap while muted unmutes and listens: tapping the mic can only mean
+    // "I want to talk". (It used to stay muted, and since a press held for a
+    // moment mutes, a press-and-talk left him deaf to every later tap.)
+    if (muted) setMuted(false)
     // Offline: the window's recogniser (Chrome's) cannot hear without the
     // internet, so the wake listener hears the command instead, with Vosk —
     // it beeps, listens and sends what it heard as a request.
@@ -1568,6 +1568,7 @@ const handleRequest = async (req, res) => {
       } catch {
         /* the listener is not set up */
       }
+      console.log('[jarvis] mic button (offline) -> the wake listener hears the command')
       popupState.heard = 'Listening (offline)…'
       popupState.said = ''
       res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
@@ -2033,6 +2034,96 @@ function switchBrains(news) {
       /* already gone */
     }
   }
+}
+
+// ------------------------------------------------------------ offline quick answers
+//
+// Offline, the local model takes minutes for "what is my battery level" (it
+// gave no answer in two minutes, measured). These everyday questions are
+// answered at once from what the bridge already knows. The offline speech
+// recogniser writes numbers as words ("at five thirty pm"), so those are read.
+
+const NUMS = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, a: 1, an: 1,
+}
+/** "5", "five", "twenty five", "fifteen" → a number; null if not one. */
+function wordNum(s) {
+  const t = String(s ?? '').trim().toLowerCase()
+  if (/^\d+$/.test(t)) return Number(t)
+  const parts = t.split(/[\s-]+/).filter(Boolean)
+  if (!parts.length || parts.some((p) => !(p in NUMS))) return null
+  return parts.reduce((a, p) => a + NUMS[p], 0)
+}
+const NUM = '((?:\\d+)|(?:(?:twenty|thirty|forty|fifty)[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|a|an))'
+
+/** "at five pm", "at 7:30 am", "at five thirty pm", "in twenty minutes" → a Date, or null. */
+function whenFrom(s) {
+  const t = s.toLowerCase().replace(/\bp\.?\s?m\b/g, 'pm').replace(/\ba\.?\s?m\b/g, 'am').replace(/\bo'?clock\b/g, '').trim()
+  let m = new RegExp(`^in ${NUM} (minute|minutes|min|mins|hour|hours)$`).exec(t)
+  if (m) {
+    const n = wordNum(m[1])
+    if (n == null) return null
+    return new Date(Date.now() + n * (/^h/.test(m[2]) ? 3600_000 : 60_000))
+  }
+  m = new RegExp(`^at ${NUM}(?:[:\\s]${NUM})?\\s*(am|pm)?(?: (today|tomorrow))?$`).exec(t)
+  if (!m) return null
+  let h = wordNum(m[1])
+  const min = m[2] ? wordNum(m[2]) : 0
+  if (h == null || min == null || h > 23 || min > 59) return null
+  if (m[3] === 'pm' && h < 12) h += 12
+  if (m[3] === 'am' && h === 12) h = 0
+  const d = new Date()
+  d.setHours(h, min, 0, 0)
+  // No am/pm and already past today: the next one (this evening, or tomorrow).
+  if (!m[3] && d.getTime() < Date.now() && h < 12) d.setHours(h + 12)
+  if (m[4] === 'tomorrow' || d.getTime() < Date.now()) d.setDate(d.getDate() + 1)
+  return d
+}
+
+async function offlineQuick(text) {
+  const t = String(text ?? '').replace(/^\[.*?\]\s*/, '').toLowerCase().replace(/[?!,]/g, ' ').replace(/\.(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!t || t.split(' ').length > 16) return null
+  const st = /\b(battery|charg|wi ?-?fi|internet|network|connect|disk|storage|space|drive|status|system)/.test(t) ? await telemetryReady() : telemetry()
+  const time = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+
+  // Reminders: "remind me to call mom at five pm", "set a reminder to … in twenty minutes".
+  let m = /^(?:please )?(?:remind me to|set a reminder to|set reminder to|add a reminder to|remind me)\s+(.+?)\s+((?:at|in)\s.+)$/.exec(t)
+  if (m) {
+    const at = whenFrom(m[2])
+    if (at) {
+      addSchedule({ at: at.toISOString(), text: m[1] })
+      const day = at.toDateString() === new Date().toDateString() ? 'today' : 'tomorrow'
+      return `Done — I'll remind you to ${m[1]} at ${time(at)} ${day}.`
+    }
+  }
+  // What's coming up.
+  if (/\b(what('s| is| are)?|any|my) .{0,20}\b(reminders?|calendar|schedule|plans?)\b/.test(t) || /^(reminders?|my schedule|my calendar)$/.test(t)) {
+    const next = scheduleList().filter((e) => !e.done && new Date(e.at) > new Date()).slice(0, 3)
+    if (!next.length) return 'Nothing coming up on your calendar.'
+    return 'Coming up: ' + next.map((e) => `${e.text} at ${time(new Date(e.at))}${new Date(e.at).toDateString() === new Date().toDateString() ? '' : ` on ${new Date(e.at).toLocaleDateString('en-US', { weekday: 'long' })}`}`).join('; ') + '.'
+  }
+  // The PC. "System status" / "how is my laptop": everything at once.
+  if (/\b(system|status|laptop|computer|pc)\b/.test(t) && /\b(status|doing|health|how)\b/.test(t)) {
+    const bits = [`CPU ${st.cpu}%`, `memory ${Math.round((st.memUsed / st.memTotal) * 100)}%`]
+    if (st.battery != null) bits.push(`battery ${st.battery}%${st.charging ? ' and charging' : ''}`)
+    if (st.diskFree != null) bits.push(`${Math.round(st.diskFree)} gigabytes free on C`)
+    return `System status: ${bits.join(', ')}.`
+  }
+  if (/\b(battery|charging|charge)\b/.test(t) && st.battery != null) {
+    return `Battery is at ${st.battery}%${st.charging ? ', and charging' : ', not charging'}.`
+  }
+  if (/\b(wi ?-?fi|internet|network|connected|connection)\b/.test(t)) {
+    return st.wifi ? `You're on the ${st.wifi} Wi-Fi, but the internet isn't reachable right now.` : "You're not connected to Wi-Fi."
+  }
+  if (/\b(disk|storage|space|drive)\b/.test(t) && st.diskFree != null) {
+    return `${Math.round(st.diskFree)} gigabytes free on drive C${st.diskTotal ? `, of ${Math.round(st.diskTotal)}` : ''}.`
+  }
+  if (/\b(cpu|processor|memory|ram)\b/.test(t)) {
+    return `CPU is at ${st.cpu}%, and memory ${Math.round((st.memUsed / st.memTotal) * 100)}% used.`
+  }
+  return null
 }
 
 /**
@@ -2901,6 +2992,21 @@ wss.on('connection', (socket) => {
           // on the local model. Anything else goes on to it.
           if (isLocalBrain()) {
             let quick = quickAnswer(text) ? { say: quickAnswer(text), tool: null } : null
+            if (!quick) {
+              const said = await offlineQuick(text).catch(() => null)
+              if (said) quick = { say: said, tool: null }
+            }
+            if (!quick) {
+              // Several file steps in one sentence ("open downloads, make a new
+              // folder in it, cut X and paste it there") — before the one-step
+              // shortcut, which would only open the folder.
+              try {
+                const did = await offlineFileSteps(text, { open: (p) => runPcTool('open_folder', { path: p }) })
+                if (did) quick = { say: did, tool: 'open_folder' }
+              } catch (err) {
+                console.log(`[jarvis] offline file steps failed: ${err.message}`)
+              }
+            }
             if (!quick) {
               try {
                 quick = await quickCommand(text, runPcTool)

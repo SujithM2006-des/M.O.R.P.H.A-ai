@@ -339,7 +339,9 @@ export function Setup() {
                 onBlur={() => set({ assistant: dottedName(form.assistant) })}
               />
               <small>
-                Shown as {dottedName(form.assistant)} · said “{nameWord(spokenName(form.assistant))}” · the wake phrase stays “Hey Jarvis”.
+                Shown as {dottedName(form.assistant)} · say “Hey {nameWord(spokenName(form.assistant))}”, “Hello{' '}
+                {nameWord(spokenName(form.assistant))}” or just “{nameWord(spokenName(form.assistant))}” to call
+                {spokenName(form.assistant).toLowerCase() === 'jarvis' ? '' : ' (“Hey Jarvis” works too)'}.
               </small>
             </label>
           </div>
