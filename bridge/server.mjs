@@ -60,12 +60,30 @@ const KEY_CHECKS = {
 const keyJobs = { running: false, jobs: {} }
 
 /** ChatGPT's sign-in in JARVIS's window, as last checked (null: not known yet). */
-let chatgptConnected = null
+// The last answer is kept on disk: with JARVIS's Chrome window closed it cannot
+// be looked at, and Setup showed "Checking…" for ever.
+const CHATGPT_SEEN = join(homedir(), '.jarvis', 'chatgpt-signed-in.json')
+let chatgptConnected = (() => {
+  try {
+    const v = JSON.parse(readFileSync(CHATGPT_SEEN, 'utf8')).connected
+    return typeof v === 'boolean' ? v : null
+  } catch {
+    return null
+  }
+})()
 let chatgptChecking = null
+const rememberChatgpt = (v) => {
+  chatgptConnected = v
+  try {
+    writeFileSync(CHATGPT_SEEN, JSON.stringify({ connected: v, at: new Date().toISOString() }))
+  } catch {
+    /* only a convenience */
+  }
+}
 const checkChatgpt = () =>
   (chatgptChecking ??= chatgptSignedIn()
     .then((v) => {
-      if (v !== null) chatgptConnected = v
+      if (v !== null) rememberChatgpt(v)
       return chatgptConnected
     })
     .finally(() => (chatgptChecking = null)))
@@ -82,7 +100,7 @@ async function runKeyJobs(providers) {
     if (p === 'chatgpt') {
       try {
         job.note = 'Sign in to ChatGPT in the window — Google will ask which account.'
-        chatgptConnected = await chatgptSignIn()
+        rememberChatgpt(await chatgptSignIn())
         if (!chatgptConnected) throw new Error('Not signed in to ChatGPT within 5 minutes.')
         job.state = 'done'
         job.note = 'Connected'
@@ -1405,7 +1423,9 @@ const handleRequest = async (req, res) => {
   }
   if (req.method === 'POST' && req.url === '/keys') {
     const changed = saveKeys(await readJson(req))
-    if (changed) await startProxy()
+    // In the background: LiteLLM can take minutes to restart, and Setup's
+    // "Disconnecting…" waited on it the whole time (the key was gone at once).
+    if (changed) void startProxy().catch((err) => console.log(`[jarvis] LiteLLM restart failed: ${err.message}`))
     res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
     return res.end(JSON.stringify({ keys: maskedKeys(), ...brainsInfo() }))
   }
@@ -1428,7 +1448,7 @@ const handleRequest = async (req, res) => {
     let ok = false
     try {
       ok = await chatgptLogout()
-      chatgptConnected = false
+      rememberChatgpt(false)
     } catch (err) {
       console.log(`[jarvis] ChatGPT sign-out failed: ${err.message}`)
     }

@@ -1081,27 +1081,48 @@ async function getKey(provider, say) {
     await page.waitForTimeout(5000)
 
     // Sign in: "Continue with Google" is pressed for them; they pick the account.
-    let pressed = false
+    //
+    // Never navigate away while a sign-in is finishing. Groq comes back from
+    // Google to its own /authenticate page, which completes the login; this
+    // loop used to jump to the keys page 2.5 s later, cutting it off, so Groq
+    // showed its sign-in page again — and again ("keeps redirecting to sign in").
+    const AUTHING = /accounts\.google\.com|sign-?in|sign-?up|log-?in|auth|callback|oauth|sso|stytch|token|verify|magic/i
+    const signInPrompt = () => visibleButton(page, /continue with google|^\s*(sign|log) ?in\s*$/i)
+    let presses = 0
+    let lastPress = 0
+    let elsewhere = 0 // checks in a row on some other page of the site, signed in
     const until = Date.now() + 5 * 60_000
     while (Date.now() < until) {
       const url = page.url()
-      const loginButton = visibleButton(page, /Continue with Google/i)
-      if (site.signedIn(url) && !(await loginButton.count())) break
-      if (!pressed && (await loginButton.count())) {
+      const prompt = signInPrompt()
+      const asking = (await prompt.count()) > 0
+      if (site.signedIn(url) && !asking) break
+      const google = visibleButton(page, /Continue with Google/i)
+      if ((await google.count()) && presses < 3 && Date.now() - lastPress > 10_000) {
         say(`Signing in to ${site.label} with Google — choose your Google account in the window.`)
-        await loginButton.first().click().catch(() => {})
-        pressed = true
+        await google.first().click().catch(() => {})
+        presses++
+        lastPress = Date.now()
+        elsewhere = 0
       } else if (/accounts\.google\.com/.test(url)) {
         say(`Choose your Google account (or sign in) in the window for ${site.label}.`)
       }
       await page.waitForTimeout(2500)
-      // After sign-in some sites land elsewhere: go back to the keys page.
-      if (pressed && !/accounts\.google\.com|sign-?in|login/i.test(page.url()) && !site.signedIn(page.url())) {
-        await page.goto(site.url, { waitUntil: 'domcontentloaded' }).catch(() => {})
-        await page.waitForTimeout(4000)
+      // Signed in but landed elsewhere (a dashboard, a welcome page): back to
+      // the keys page — only once it has sat there a while and is not part of
+      // signing in.
+      const now = page.url()
+      if (presses && hostOf(now) === hostOf(site.url) && !AUTHING.test(now) && !site.signedIn(now) && !asking) {
+        if (++elsewhere >= 2) {
+          elsewhere = 0
+          await page.goto(site.url, { waitUntil: 'domcontentloaded' }).catch(() => {})
+          await page.waitForTimeout(4000)
+        }
+      } else {
+        elsewhere = 0
       }
     }
-    if (!site.signedIn(page.url())) throw new Error(`Not signed in to ${site.label} within 5 minutes.`)
+    if (!site.signedIn(page.url()) || (await signInPrompt().count())) throw new Error(`Not signed in to ${site.label} within 5 minutes.`)
     await page.waitForTimeout(3000)
     say(`Signed in to ${site.label}. Getting the key…`)
 

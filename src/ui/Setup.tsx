@@ -109,6 +109,9 @@ export function Setup() {
   const [accounts, setAccounts] = useState<Accounts | null>(null)
   /** The account being disconnected right now ('' when none). */
   const [leaving, setLeaving] = useState('')
+  // ChatGPT's sign-in has been looked at (even if the answer was "unknown",
+  // with JARVIS's Chrome window closed): stop showing "Checking…".
+  const [checked, setChecked] = useState(false)
   const [keyInput, setKeyInput] = useState<Record<string, string | null>>({})
   const [voices, setVoices] = useState<{ name: string; lang: string }[]>([])
   /** The voice picked for offline here ('' = unchanged). */
@@ -145,10 +148,12 @@ export function Setup() {
         .then((r) => (r.ok ? r.json() : null))
         .then((a) => a && setAccounts(a))
         .catch(() => {})
+      setChecked(false)
       fetch(`${BRIDGE_HTTP_URL}/accounts?check=1`, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((a) => a && setAccounts(a))
         .catch(() => {})
+        .finally(() => setChecked(true))
       setError('')
       setSaving('')
     }
@@ -559,7 +564,7 @@ export function Setup() {
                           </button>
                         )}
                       </span>
-                    ) : connected === null && a.id === 'chatgpt' ? (
+                    ) : connected === null && a.id === 'chatgpt' && !checked ? (
                       <span className="su-acc-wait">
                         <i />
                         Checking…
