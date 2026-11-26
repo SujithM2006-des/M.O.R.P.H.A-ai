@@ -293,7 +293,10 @@ def load_whisper():
             if not path:
                 return
             t0 = time.monotonic()
-            WHISPER["model"] = WhisperModel(str(path), device="cpu", compute_type="int8")
+            # 8 threads: 2.3 s a command instead of 3.1 s on this laptop's real
+            # recordings (measured), with the same words.
+            WHISPER["model"] = WhisperModel(str(path), device="cpu", compute_type="int8",
+                                            cpu_threads=min(8, os.cpu_count() or 4))
             log(f"Whisper ({path.name}) ready for offline commands ({time.monotonic() - t0:.0f}s to load)")
         except Exception as err:
             log(f"Whisper unavailable, using Vosk for commands: {err}")
@@ -302,6 +305,38 @@ def load_whisper():
 
     WHISPER["loading"] = True
     threading.Thread(target=work, daemon=True).start()
+
+
+# The multilingual model (optional, ~460 MB): commands said in Tamil, Hindi
+# or another language are translated into English by it, so the same offline
+# commands work. Loaded the first time it is needed, not before.
+MULTI_DIR = HOME / "whisper" / "small"
+MULTI = {"model": None}
+# Off unless ~/.jarvis/offline-languages exists. Measured on this laptop: a
+# Tamil "what's the time now" came out right, but "what is my battery level"
+# became "what is my father's name", each took 15-25 s, and Hindi was read
+# as English ("chrome colo") so it never got here. Not good enough to be on
+# by default, where it could slow down an unclear English command.
+MULTI_ON = HOME / "offline-languages"
+
+
+def translate_text(audio):
+    """`audio` (float32) in any language -> English words; "" if unavailable."""
+    try:
+        if MULTI["model"] is None:
+            from faster_whisper import WhisperModel
+
+            MULTI["model"] = WhisperModel(str(MULTI_DIR), device="cpu", compute_type="int8",
+                                          cpu_threads=min(8, os.cpu_count() or 4))
+        segs, info = MULTI["model"].transcribe(audio, task="translate", beam_size=1, vad_filter=True,
+                                                condition_on_previous_text=False, without_timestamps=True)
+        text = " ".join(s.text.strip() for s in segs).strip()
+        if text:
+            log(f"heard {info.language} ({info.language_probability:.0%}), translated")
+        return text
+    except Exception as err:
+        log(f"multilingual Whisper failed: {err}")
+        return ""
 
 
 # Whisper's well-known inventions on silence or noise.
@@ -324,9 +359,20 @@ def whisper_text(pcm):
     )
     try:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        segs, _ = m.transcribe(audio, language="en", beam_size=1, initial_prompt=prompt, vad_filter=True,
-                               condition_on_previous_text=False)
+        segs, info = m.transcribe(audio, language="en", beam_size=1, initial_prompt=prompt, vad_filter=True,
+                                  condition_on_previous_text=False, without_timestamps=True)
+        segs = list(segs)
         text = " ".join(s.text.strip() for s in segs).strip()
+        # Not English (Tamil, Hindi …): the English model's guess is poor
+        # (low confidence) — the multilingual model, if installed, hears the
+        # language and translates it into English, so every offline command
+        # works in it too.
+        sure = (sum(s.avg_logprob for s in segs) / len(segs)) if segs else -9.0
+        if sure < -0.9 and MULTI_DIR.exists() and MULTI_ON.exists():
+            other = translate_text(audio)
+            if other:
+                log(f'not English? translated: "{other}" (English reading "{text}", confidence {sure:.2f})')
+                text = other
     except Exception as err:
         log(f"Whisper failed: {err}")
         return ""
