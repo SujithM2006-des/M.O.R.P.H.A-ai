@@ -100,7 +100,8 @@ function Show-Toast([string]$title, [string]$body) {
 }
 
 function Stop-Jarvis {
-  # The JARVIS window (its own Chrome profile) and the brain console. Nothing else.
+  # The JARVIS window (its own Chrome profile) and the brain (a hidden console,
+  # found by its "npm start -- --writes" command line). Nothing else.
   Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
     Where-Object { $_.CommandLine -like '*face-profile*' -and $_.CommandLine -notlike '*--type=*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

@@ -495,7 +495,8 @@
           return
         }
         if ((Date.now() - started) / 1000 > 90) {
-          note.textContent = 'Taking longer than usual — check the JARVIS brain window'
+          // The brain runs hidden now (no console on the taskbar): its log is the place to look.
+          note.textContent = 'Taking longer than usual — see .jarvis\\jarvis.log in your user folder, or restart JARVIS'
         }
         setTimeout(tick, 600)
       }

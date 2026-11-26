@@ -14,8 +14,11 @@ set "SPLASH=%~dp0scripts\splash.html"
 set "SPLASH=file:///%SPLASH:\=/%"
 if /i "%~1"=="wake" set "SPLASH=%SPLASH%?wake=1"
 
-rem The brain, unless it is already running.
-curl -s -o nul -m 2 http://127.0.0.1:8787/health || start "JARVIS brain" /min cmd /k "npm start -- --writes"
+rem The brain, unless it is already running — hidden: it used to sit on the
+rem taskbar as a minimised console. Everything it prints still goes to
+rem %USERPROFILE%\.jarvis\jarvis.log, and the JARVIS ON / OFF switch stops it
+rem (it finds it by the "npm start -- --writes" in its command line).
+curl -s -o nul -m 2 http://127.0.0.1:8787/health || powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -ArgumentList '/c','npm start -- --writes' -WorkingDirectory '%~dp0.' -WindowStyle Hidden"
 
 rem Popup mode (%USERPROFILE%\.jarvis\popup-mode exists): the main window starts
 rem minimised and works in the background; the small popup is the face. Not
