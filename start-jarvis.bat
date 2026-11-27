@@ -20,6 +20,11 @@ rem %USERPROFILE%\.jarvis\jarvis.log, and the JARVIS ON / OFF switch stops it
 rem (it finds it by the "npm start -- --writes" in its command line).
 curl -s -o nul -m 2 http://127.0.0.1:8787/health || powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -ArgumentList '/c','npm start -- --writes' -WorkingDirectory '%~dp0.' -WindowStyle Hidden"
 
+rem Only one J.A.R.V.I.S.: if his window is already open, it is brought to the
+rem front (in popup mode, the popup is shown) and no second one opens.
+powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\focus-jarvis.ps1"
+if not errorlevel 1 exit /b 0
+
 rem Popup mode (%USERPROFILE%\.jarvis\popup-mode exists): the main window starts
 rem minimised and works in the background; the small popup is the face. Not
 rem before the first-run setup is done, though: that screen is in the main window.

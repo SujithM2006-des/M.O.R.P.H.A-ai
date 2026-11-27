@@ -266,7 +266,7 @@ Frontend settings go in `.env.local`; bridge settings are environment variables.
 | `VITE_TTS_ENGINE` | `system` (instant) or `kokoro` (neural, British, GPU) |
 | `VITE_SPEECH_LANG` | Recognition accent: `en-IN`, `en-GB`, `en-US` … |
 | `VITE_END_PAUSE_MS` | Quiet that ends a command — raise it if you get cut off |
-| `VITE_MUSIC_AMBIENT` / `VITE_MUSIC_WORK` / `VITE_MUSIC` | `off` to drop the background music / the working cue / all music |
+| `VITE_MUSIC` | music is off by default; `on` turns it on (then `VITE_MUSIC_AMBIENT` / `VITE_MUSIC_WORK` = `off` drop the background music / the working cue) |
 | `VITE_WAKE_GREETING` | `spoken`: "Yes, sir?" after "Hey Jarvis" if you pause (never over you) |
 | `VITE_AUTOSTART` | `off` brings back the INITIALISE button |
 | `JARVIS_PERSONA` | `formal` for the original terse film-butler persona |

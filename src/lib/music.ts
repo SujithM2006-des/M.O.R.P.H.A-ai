@@ -44,7 +44,12 @@ const finished = new Set<Cue>()
 const ALL: Cue[] = ['boot-music', 'ambient', 'work']
 let enabled = false
 
-const MUSIC_OFF = String(import.meta.env.VITE_MUSIC ?? '').trim().toLowerCase() === 'off'
+/**
+ * No music unless asked for: VITE_MUSIC=on turns the score on. Off by default
+ * because the owner does not want background music in the page, ever — and a
+ * fresh install has no .env to switch it off with.
+ */
+const MUSIC_OFF = String(import.meta.env.VITE_MUSIC ?? '').trim().toLowerCase() !== 'on'
 
 /**
  * VITE_MUSIC_AMBIENT=off drops only the ambient bed — the soft music under
@@ -126,8 +131,8 @@ function track(cue: Cue): Track | null {
 
 /** Must be called from a user gesture — browsers block audio before one. */
 export function enable() {
-  // VITE_MUSIC=off silences the whole score — boot swell, ambient bed and the
-  // working cue. Every other call here checks `enabled`, so leaving it false is
+  // Without VITE_MUSIC=on there is no score at all — boot swell, ambient bed
+  // and the working cue. Every other call here checks `enabled`, so leaving it false is
   // all it takes. The short interface sound effects (sfx.ts) are separate.
   if (MUSIC_OFF) return
   enabled = true
