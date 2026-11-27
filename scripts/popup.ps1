@@ -61,9 +61,9 @@ $script:hue = $themeHues[$script:theme]
 # messages, and the main window's title, which is how this finds that window.
 function Get-Assistant {
   try { $a = ([IO.File]::ReadAllText($profileFile) | ConvertFrom-Json).assistant } catch { $a = $null }
-  # The plain name ("J.A.R.V.I.S" -> "JARVIS"), as it is said.
+  # The plain name ("M.O.R.P.H.A" -> "MORPHA"), as it is said.
   $a = ("$a" -replace '\.+', '' -replace '\s+', ' ').Trim()
-  if ($a) { $a } else { 'JARVIS' }
+  if ($a) { $a } else { 'MORPHA' }
 }
 $script:assistant = Get-Assistant
 # Written with a dot after every letter ("F.R.I.D.A.Y."): the same rule as
@@ -621,7 +621,7 @@ $clickTimer.Start()
 # sight while still running (and listening) in the background.
 # Not before the first-run setup is done: that screen is in the main window.
 $main = [JarvisPopup.Keys]::FindWindow([NullString]::Value, $script:title)
-if ($main -eq [IntPtr]::Zero) { $main = [JarvisPopup.Keys]::FindWindow([NullString]::Value, 'J.A.R.V.I.S.') }
+if ($main -eq [IntPtr]::Zero) { $main = [JarvisPopup.Keys]::FindWindow([NullString]::Value, 'M.O.R.P.H.A.') }  # the loading screen
 $setUp = Test-Path (Join-Path $env:USERPROFILE '.jarvis\profile.json')
 if ($setUp -and $main -ne [IntPtr]::Zero) { [void][JarvisPopup.Keys]::ShowWindow($main, 6) }
 

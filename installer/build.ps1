@@ -1,4 +1,4 @@
-# Builds the J.A.R.V.I.S. setup file:  JARVIS-Setup-<version>.exe
+# Builds the M.O.R.P.H.A. setup file:  MORPHA-Setup-<version>.exe
 #
 #   powershell -ExecutionPolicy Bypass -File installer\build.ps1 [-Version 2.0.0] [-Out <folder>]
 #
@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'app'), $Out | Out-N
 # --- the app: tracked files only ---------------------------------------------
 $files = @(git -C $repo ls-files) + @(git -C $repo ls-files --others --exclude-standard -- installer) | Sort-Object -Unique
 # Not for users: the developer's tool settings, the test suite, the bug log.
-$skip = '^(\.claude/|test/|\.oxlintrc\.json$|BUG-REPORT\.md$|installer/build\.ps1$)'
+$skip = '^(\.claude/|test/|\.oxlintrc\.json$|BUG-REPORT\.md$|installer/build\.ps1$|scripts/try-ollama\.mjs$)'
 $count = 0
 foreach ($f in $files) {
   if ($f -match $skip) { continue }
@@ -60,13 +60,22 @@ function Draw-Reactor($g, [float]$cx, [float]$cy, [float]$r) {
   $g.FillEllipse((New-Object System.Drawing.SolidBrush $accent), $cx - $r * 0.22, $cy - $r * 0.22, $r * 0.44, $r * 0.44)
 }
 
+# The M.O.R.P.H.A. logo (public\brand): the round M for icons, the badge with
+# the name for the wizard's big picture.
+$markImg = [System.Drawing.Image]::FromFile((Join-Path $repo 'public\brand\morpha-mark.png'))
+$logoImg = [System.Drawing.Image]::FromFile((Join-Path $repo 'public\brand\morpha-logo.png'))
+function Draw-Scaled($g, $img, [float]$x, [float]$y, [float]$w, [float]$h) {
+  $g.InterpolationMode = 'HighQualityBicubic'
+  $g.SmoothingMode = 'AntiAlias'
+  $g.PixelOffsetMode = 'HighQuality'
+  $g.DrawImage($img, $x, $y, $w, $h)
+}
+
 function Png([int]$size) {
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.Clear([System.Drawing.Color]::Transparent)
-  $g.SmoothingMode = 'AntiAlias'
-  $g.FillEllipse((New-Object System.Drawing.SolidBrush $navy), $size * 0.03, $size * 0.03, $size * 0.94, $size * 0.94)
-  Draw-Reactor $g ($size / 2) ($size / 2) ($size / 2)
+  Draw-Scaled $g $markImg 0 0 $size $size
   $g.Dispose()
   $ms = New-Object System.IO.MemoryStream
   $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -98,14 +107,21 @@ function Wizard-Bitmap([int]$w, [int]$h, [string]$path, [bool]$big) {
   $bg = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect, ([System.Drawing.Color]::FromArgb(255, 6, 22, 44)), $navy, 90
   $g.FillRectangle($bg, $rect)
   if ($big) {
-    Draw-Reactor $g ($w / 2) ($h * 0.36) ($w * 0.36)
+    # The badge (the M and the word MORPHA), then the name and the credit.
+    # Clipped to a circle: the picture's square corners do not match this background.
+    $side = $w * 0.94
+    $clip = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $clip.AddEllipse([float](($w - $side) / 2 + $side * 0.015), [float]($h * 0.16 + $side * 0.015), [float]($side * 0.97), [float]($side * 0.97))
+    $g.SetClip($clip)
+    Draw-Scaled $g $logoImg (($w - $side) / 2) ($h * 0.16) $side $side
+    $g.ResetClip()
     $g.TextRenderingHint = 'AntiAliasGridFit'
     $fmt = New-Object System.Drawing.StringFormat; $fmt.Alignment = 'Center'
-    $g.DrawString('J.A.R.V.I.S.', (New-Object System.Drawing.Font 'Segoe UI Semibold', ([float]($w * 0.085))), (New-Object System.Drawing.SolidBrush $accent), (New-Object System.Drawing.RectangleF 0, ($h * 0.62), $w, ($h * 0.1)), $fmt)
-    $g.DrawString('Personal AI Assistant', (New-Object System.Drawing.Font 'Segoe UI', ([float]($w * 0.052))), (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(200, 200, 225, 240))), (New-Object System.Drawing.RectangleF 0, ($h * 0.70), $w, ($h * 0.06)), $fmt)
+    $g.DrawString('M.O.R.P.H.A.', (New-Object System.Drawing.Font 'Segoe UI Semibold', ([float]($w * 0.085))), (New-Object System.Drawing.SolidBrush $accent), (New-Object System.Drawing.RectangleF 0, ($h * 0.68), $w, ($h * 0.1)), $fmt)
+    $g.DrawString('Personal AI Assistant', (New-Object System.Drawing.Font 'Segoe UI', ([float]($w * 0.052))), (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(200, 200, 225, 240))), (New-Object System.Drawing.RectangleF 0, ($h * 0.76), $w, ($h * 0.06)), $fmt)
     $g.DrawString('(C) 2026 Sujith M', (New-Object System.Drawing.Font 'Segoe UI', ([float]($w * 0.045))), (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, 160, 190, 210))), (New-Object System.Drawing.RectangleF 0, ($h * 0.92), $w, ($h * 0.05)), $fmt)
   } else {
-    Draw-Reactor $g ($w / 2) ($h / 2) ($w * 0.46)
+    Draw-Scaled $g $markImg ($w * 0.04) ($h * 0.04) ($w * 0.92) ($h * 0.92)
   }
   $g.Dispose()
   $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Bmp)
@@ -114,6 +130,7 @@ function Wizard-Bitmap([int]$w, [int]$h, [string]$path, [bool]$big) {
 # Twice the standard sizes, so they stay crisp on high-DPI screens.
 Wizard-Bitmap 328 628 (Join-Path $stage 'wizard.bmp') $true
 Wizard-Bitmap 110 110 (Join-Path $stage 'wizard-small.bmp') $false
+$markImg.Dispose(); $logoImg.Dispose()
 
 # --- compile ------------------------------------------------------------------
 & $iscc /Q "/DAppVersion=$Version" "/DStage=$stage" "/DOutDir=$Out" (Join-Path $PSScriptRoot 'jarvis.iss')
@@ -122,7 +139,7 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed on the setup (exit $LASTEXIT
 & $iscc /Q "/DAppVersion=$Version" "/DStage=$stage" "/DOutDir=$Out" (Join-Path $PSScriptRoot 'uninstaller.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed on the uninstaller (exit $LASTEXITCODE)" }
 Remove-Item $stage -Recurse -Force
-foreach ($name in "JARVIS-Setup-$Version.exe", 'JARVIS-Uninstall.exe') {
+foreach ($name in "MORPHA-Setup-$Version.exe", 'MORPHA-Uninstall.exe') {
   $exe = Get-Item (Join-Path $Out $name)
   Write-Host ("built {0} ({1:N1} MB)" -f $exe.FullName, ($exe.Length / 1MB))
 }

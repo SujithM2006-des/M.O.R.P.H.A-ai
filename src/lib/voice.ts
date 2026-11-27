@@ -94,31 +94,104 @@ const NAME_LOOSE = '(?:j|g|ch|dj|h|d|tr|sh)[aeo]{1,2}r?\\s?[vb][iyea]{1,2}s{0,2}
 /** Greetings that may come before his name: "hey", "hello", "hi" … */
 const GREET = '(?:hey|hi|hello|ok|okay|yo)'
 
+/** The name until one is chosen in setup. */
+const DEFAULT_NAME = 'morpha'
+
 /**
- * The wake pattern for a name. The name from setup ("Friday", "Mr Bean") is
- * matched as said — with a greeting in front or alone — and "Jarvis" always
- * stays an alias: the background listener's built-in model only knows "Hey
- * Jarvis", and the loose spellings above are what make it work with an accent.
+ * How a name SOUNDS, roughly: its consonants, with sound-alike spellings
+ * merged ("morpha" -> "mrf", "more for" -> "mrfr", "Martha" -> "mrt"). A name
+ * the recogniser does not know ("Morpha", most made-up names) comes back
+ * spelled as whatever it sounded like, and this is what still recognises it.
+ * The same rule as sound_key() in scripts/wake_listener.py.
  */
-function wakeFor(name: string): RegExp {
-  const n = String(name ?? '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase()
-  const own = n && n !== 'jarvis' ? n.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s-]?') : ''
-  const strict = own ? `${own}|${NAME_STRICT}` : NAME_STRICT
-  const loose = own ? `${own}|${NAME_LOOSE}` : NAME_LOOSE
-  return new RegExp(`\\b(?:${GREET}[\\s,]+(?:${loose})|(?:${GREET}[\\s,]*)?(?:${strict}))\\b(?!'s)`, 'i')
+const SOUNDS: [string, string][] = [
+  ['ph', 'f'], ['gh', 'g'], ['th', 't'], ['ck', 'k'], ['sh', 's'], ['ch', 'k'],
+  ['q', 'k'], ['x', 'ks'], ['z', 's'], ['v', 'f'], ['c', 'k'],
+]
+function soundKey(text: string): string {
+  let s = text.toLowerCase().replace(/[^a-z]/g, '')
+  if (!s) return ''
+  for (const [a, b] of SOUNDS) s = s.split(a).join(b)
+  const key = (/[aeiouy]/.test(s[0]) ? 'a' : s[0]) + s.slice(1).replace(/[aeiouyhw]/g, '')
+  return key.replace(/(.)\1+/g, '$1')
 }
 
-let WAKE = wakeFor('jarvis')
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0]
+    row[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const cur = row[j]
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
+      prev = cur
+    }
+  }
+  return row[b.length]
+}
+
+/** Close enough to be the name (same rule as sounds_like() in the listener). */
+function soundsLike(nameKey: string, heardKey: string): boolean {
+  if (!nameKey || !heardKey) return false
+  if (heardKey === nameKey) return true
+  if (nameKey.length < 3 || heardKey.slice(0, 2) !== nameKey.slice(0, 2)) return false
+  if (nameKey.length <= 4 && heardKey.length < nameKey.length) return false
+  return editDistance(nameKey, heardKey) <= (nameKey.length <= 4 ? 1 : 2)
+}
+
+const GREET_WORDS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'yo'])
+
+type WakeMatch = { index: number; 0: string }
+type Wake = { test(text: string): boolean; exec(text: string): WakeMatch | null }
 
 /**
- * Answer to the assistant's name from setup: "hey <name>", "hello <name>",
+ * The wake pattern for a name. The name from setup ("Morpha", "Friday", "Mr
+ * Bean") is matched as written — with a greeting in front or alone — and,
+ * after "hey / hi / hello", also by how it sounds ("hey more for", "hi
+ * Murphy" for Morpha), so it answers however the recogniser spells it. The
+ * Jarvis spellings above are used only while the name is Jarvis.
+ */
+function wakeFor(name: string): Wake {
+  const n = String(name ?? '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase() || DEFAULT_NAME
+  let re: RegExp
+  if (n === 'jarvis') {
+    re = new RegExp(`\\b(?:${GREET}[\\s,]+(?:${NAME_LOOSE})|(?:${GREET}[\\s,]*)?(?:${NAME_STRICT}))\\b(?!'s)`, 'i')
+  } else {
+    const own = n.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s-]?')
+    re = new RegExp(`\\b(?:${GREET}[\\s,]*)?(?:${own})\\b(?!'s)`, 'i')
+  }
+  const key = soundKey(n)
+  const exec = (text: string): WakeMatch | null => {
+    const m = re.exec(text)
+    if (m) return m
+    // "hey/hi/hello" and then one to three words that sound like the name.
+    const words = [...text.matchAll(/[a-z']+/gi)]
+    for (let i = 0; i < words.length; i++) {
+      if (!GREET_WORDS.has(words[i][0].toLowerCase())) continue
+      for (let j = i + 2; j <= Math.min(words.length, i + 4); j++) {
+        const heard = soundKey(words.slice(i + 1, j).map((w) => w[0]).join(''))
+        if (soundsLike(key, heard)) {
+          const end = words[j - 1].index! + words[j - 1][0].length
+          return { index: words[i].index!, 0: text.slice(words[i].index!, end) }
+        }
+      }
+    }
+    return null
+  }
+  return { exec, test: (text) => exec(text) !== null }
+}
+
+let WAKE: Wake = wakeFor(DEFAULT_NAME)
+
+/**
+ * Answer to the assistant's name from setup: "hey <name>", "hi <name>",
  * or just "<name>". Called with the profile's name when it loads or changes.
  */
 export function setWakeName(name: string | null | undefined) {
-  WAKE = wakeFor(name ?? 'jarvis')
-  const n = String(name ?? '').replace(/\./g, '').trim().toLowerCase()
+  WAKE = wakeFor(name ?? DEFAULT_NAME)
+  const n = String(name ?? '').replace(/\./g, '').trim().toLowerCase() || DEFAULT_NAME
   OVERRIDE = new RegExp(
-    `\\b(stop|wait|jarvis${n && n !== 'jarvis' ? '|' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : ''}|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\\b`,
+    `\\b(stop|wait|${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\\b`,
     'i',
   )
 }
@@ -329,7 +402,7 @@ const norm = (s: string) =>
  * would be the single most infuriating failure this file could have.
  */
 let OVERRIDE =
-  /\b(stop|wait|jarvis|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\b/i
+  /\b(stop|wait|morpha|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\b/i
 
 /**
  * Words too common to be evidence of anything.

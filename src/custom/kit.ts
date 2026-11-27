@@ -351,7 +351,7 @@ export function spokenName(n: string | null | undefined): string {
     .replace(/\.+/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return s || 'JARVIS'
+  return s || 'MORPHA'
 }
 
 /** The assistant's name as it is written: a dot after every letter ("Friday" -> "F.R.I.D.A.Y."). */
@@ -363,9 +363,21 @@ export function dottedName(n: string | null | undefined): string {
     .join(' ')
 }
 
-/** The assistant's name as a title (window, wordmark): dotted, "J.A.R.V.I.S.". */
+/** The assistant's name as a title (window, wordmark): dotted, "M.O.R.P.H.A.". */
 export function assistantTitle(p: Profile | null): string {
   return dottedName(p?.assistant)
+}
+
+/** The assistant's name as said, in ordinary capitals: "Morpha", "Mr Bean". */
+export function saidName(p: Profile | null): string {
+  return spokenName(p?.assistant)
+    .toLowerCase()
+    .replace(/(^|\s)(\p{L})/gu, (_m, a: string, b: string) => a + b.toUpperCase())
+}
+
+/** saidName() for the current profile, kept up to date (for labels and hints). */
+export function useSaidName(): string {
+  return saidName(useProfile())
 }
 
 /** A calendar event: a reminder, pending or already past. */
@@ -421,7 +433,7 @@ export async function addEvent(at: string, text: string): Promise<string | null>
     bumpSchedule()
     return res.ok ? null : String(body.error ?? 'Could not save it.')
   } catch {
-    return 'JARVIS is not running.'
+    return 'The app is not running.'
   }
 }
 

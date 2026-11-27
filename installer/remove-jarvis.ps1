@@ -71,9 +71,13 @@ if ($rec) { $installed = Norm ($rec.InstallLocation.Trim('"')); $uninst = $rec.U
 $found = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
 $sh = New-Object -ComObject WScript.Shell
 $links = @()
-foreach ($d in 'JARVIS Kill Switch', 'Popup Kill Switch') { $links += Get-ChildItem (Join-Path $DesktopDir $d) -Filter '*.lnk' }
-$links += Get-Item (Join-Path $StartupDir 'JARVIS wake listener.lnk')
-$links += Get-ChildItem $DesktopDir -Filter 'J.A.R.V.I.S*.lnk'
+# Named M.O.R.P.H.A. now, J.A.R.V.I.S. before the rename: both.
+$switchDirs = 'MORPHA Kill Switch', 'JARVIS Kill Switch', 'Popup Kill Switch'
+$startupLinks = 'MORPHA wake listener.lnk', 'JARVIS wake listener.lnk'
+$appLinks = 'M.O.R.P.H.A*.lnk', 'J.A.R.V.I.S*.lnk'
+foreach ($d in $switchDirs) { $links += Get-ChildItem (Join-Path $DesktopDir $d) -Filter '*.lnk' }
+foreach ($n in $startupLinks) { $links += Get-Item (Join-Path $StartupDir $n) }
+foreach ($f in $appLinks) { $links += Get-ChildItem $DesktopDir -Filter $f }
 foreach ($l in $links | Where-Object { $_ }) {
   $s = $sh.CreateShortcut($l.FullName)
   foreach ($part in @($s.Arguments, $s.TargetPath, $s.WorkingDirectory)) {
@@ -152,10 +156,10 @@ if (Step 'Copies') {
 
 # Shortcuts: the switches, the sign-in entry, Start menu and desktop entries.
 if (Step 'Shortcuts') {
-  foreach ($d in 'JARVIS Kill Switch', 'Popup Kill Switch') { Remove-Item (Join-Path $DesktopDir $d) -Recurse -Force }
-  Remove-Item (Join-Path $StartupDir 'JARVIS wake listener.lnk') -Force
-  Get-ChildItem $DesktopDir -Filter 'J.A.R.V.I.S*.lnk' | Remove-Item -Force
-  Get-ChildItem $ProgramsDir -Directory -Filter 'J.A.R.V.I.S*' | Remove-Item -Recurse -Force
+  foreach ($d in $switchDirs) { Remove-Item (Join-Path $DesktopDir $d) -Recurse -Force }
+  foreach ($n in $startupLinks) { Remove-Item (Join-Path $StartupDir $n) -Force }
+  foreach ($f in $appLinks) { Get-ChildItem $DesktopDir -Filter $f | Remove-Item -Force }
+  foreach ($f in 'M.O.R.P.H.A*', 'J.A.R.V.I.S*') { Get-ChildItem $ProgramsDir -Directory -Filter $f | Remove-Item -Recurse -Force }
   Say 'Removed the desktop switches, the "Hey Jarvis" sign-in entry and the Start menu entries.'
 }
 

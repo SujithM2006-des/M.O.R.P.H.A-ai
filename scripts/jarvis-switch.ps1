@@ -75,16 +75,20 @@ New-Icon $iconOff '#ff4d4d' $false
 function Set-Shortcut([bool]$on) {
   # In its own folder on the desktop; any copy left loose on the desktop goes.
   $desktop = [Environment]::GetFolderPath('Desktop')
-  $folder = Join-Path $desktop 'JARVIS Kill Switch'
+  $folder = Join-Path $desktop 'MORPHA Kill Switch'
   New-Item -ItemType Directory -Force -Path $folder | Out-Null
-  Get-ChildItem $desktop, $folder -Filter 'JARVIS - O*.lnk' -ErrorAction SilentlyContinue | Remove-Item -Force
-  $name = if ($on) { 'JARVIS - ON.lnk' } else { 'JARVIS - OFF.lnk' }
+  Get-ChildItem $desktop, $folder -Filter 'MORPHA - O*.lnk' -ErrorAction SilentlyContinue | Remove-Item -Force
+  # The switch from before the rename (J.A.R.V.I.S.): gone, folder and all.
+  $old = Join-Path $desktop 'JARVIS Kill Switch'
+  Get-ChildItem $desktop, $old -Filter 'JARVIS - O*.lnk' -ErrorAction SilentlyContinue | Remove-Item -Force
+  if ((Test-Path $old) -and -not (Get-ChildItem $old -Force -ErrorAction SilentlyContinue)) { Remove-Item $old -Force }
+  $name = if ($on) { 'MORPHA - ON.lnk' } else { 'MORPHA - OFF.lnk' }
   $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $folder $name))
   $s.TargetPath = "$env:SystemRoot\System32\wscript.exe"
   $s.Arguments = '"' + (Join-Path $PSScriptRoot 'jarvis-switch.vbs') + '"'
   $s.WorkingDirectory = $root
   $s.IconLocation = if ($on) { "$iconOn,0" } else { "$iconOff,0" }
-  $s.Description = if ($on) { 'JARVIS is ON - double-click to switch off' } else { 'JARVIS is OFF - double-click to switch on' }
+  $s.Description = if ($on) { 'M.O.R.P.H.A. is ON - double-click to switch off' } else { 'M.O.R.P.H.A. is OFF - double-click to switch on' }
   $s.Save()
 }
 
@@ -150,12 +154,15 @@ function Stop-Listener {
 # with -Boot, which starts the listener unless the switch is OFF.
 function Set-StartupEntry {
   $startup = [Environment]::GetFolderPath('Startup')
-  $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startup 'JARVIS wake listener.lnk'))
+  # The entry from before the rename, if it is this copy's: replaced by the new one.
+  $old = Join-Path $startup 'JARVIS wake listener.lnk'
+  if ((Test-Path $old) -and ((New-Object -ComObject WScript.Shell).CreateShortcut($old).Arguments -like "*$PSScriptRoot*")) { Remove-Item $old -Force }
+  $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startup 'MORPHA wake listener.lnk'))
   $s.TargetPath = "$env:SystemRoot\System32\wscript.exe"
   $s.Arguments = '"' + (Join-Path $PSScriptRoot 'jarvis-switch.vbs') + '" -Boot'
   $s.WorkingDirectory = $root
   $s.IconLocation = "$iconOn,0"
-  $s.Description = 'Starts the JARVIS "Hey Jarvis" listener at sign-in (unless the switch is OFF)'
+  $s.Description = 'Starts the M.O.R.P.H.A. "Hey Morpha" listener at sign-in (unless the switch is OFF)'
   $s.Save()
 }
 
@@ -185,11 +192,11 @@ if ($isOn) {
   Stop-Listener
   Stop-Jarvis
   Set-Shortcut $false
-  Show-Toast 'JARVIS is OFF' 'Not listening. Double-click the switch to turn him back on.'
+  Show-Toast 'M.O.R.P.H.A. is OFF' 'Not listening. Double-click the switch to turn it back on.'
 } else {
   Remove-Item $flag -Force -ErrorAction SilentlyContinue
   Start-Listener
   Start-PopupJarvis
   Set-Shortcut $true
-  Show-Toast 'JARVIS is ON' 'Say "Hey Jarvis" whenever you need him.'
+  Show-Toast 'M.O.R.P.H.A. is ON' 'Say "Hey Morpha" whenever you need it.'
 }

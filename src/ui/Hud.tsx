@@ -7,7 +7,25 @@ import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
 import { Telemetry } from './Telemetry'
-import { useHidden } from '../custom/kit'
+import { assistantTitle, useHidden, useProfile, useSaidName } from '../custom/kit'
+
+/** The wordmark: the assistant's name from setup ("M.O.R.P.H.A."). */
+function BrandMark() {
+  const profile = useProfile()
+  const title = assistantTitle(profile)
+  return (
+    <div className="brand">
+      <span className="brand-mark">{title}</span>
+      <span className="brand-sub">{title === 'J.A.R.V.I.S.' ? 'Just A Rather Very Intelligent System' : 'Personal AI Assistant'}</span>
+    </div>
+  )
+}
+
+/** The assistant's name as said ("Morpha"; upper: "MORPHA"). */
+function SaidName({ upper = false }: { upper?: boolean }) {
+  const name = useSaidName()
+  return <>{upper ? name.toUpperCase() : name}</>
+}
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -191,10 +209,7 @@ export function Hud() {
 
       <header className="hud-top">
         {ui.chrome.brand && (
-          <div className="brand">
-            <span className="brand-mark">J.A.R.V.I.S.</span>
-            <span className="brand-sub">Just A Rather Very Intelligent System</span>
-          </div>
+          <BrandMark />
         )}
 
         <div className="status">
@@ -256,7 +271,7 @@ export function Hud() {
                 exit={{ opacity: 0 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 32 }}
               >
-                <span className="log-who">{t.role === 'user' ? 'YOU' : 'JARVIS'}</span>
+                <span className="log-who">{t.role === 'user' ? 'YOU' : <SaidName upper />}</span>
                 {/* Only his half decodes. What the user said was never
                     transmitted from anywhere — dressing it up as machine
                     output would be a lie about where the words came from. */}

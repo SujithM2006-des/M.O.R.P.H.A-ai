@@ -6,7 +6,7 @@ import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
 import { useStore } from './store'
 import { setWakeName, startVoice, type Voice, type VoiceMode } from './lib/voice'
-import { createSpeaker, cycleVoice, currentVoiceName, listVoices, loadNaturalVoices, setVoiceProfile } from './lib/tts'
+import { createSpeaker, cycleVoice, currentVoiceName, listVoices, loadNaturalVoices, setSpokenName, setVoiceProfile } from './lib/tts'
 import { analyseVoice } from './lib/voiceprint'
 import CustomLayout from './custom/CustomLayout'
 import { LayoutBoundary } from './custom/LayoutBoundary'
@@ -131,7 +131,11 @@ export default function App() {
   const phase = useStore((s) => s.phase)
   // He answers to the name from setup: "hey/hello <name>" or "<name>" alone.
   const profile = useProfile()
-  useEffect(() => setWakeName(profile?.assistant), [profile?.assistant])
+  useEffect(() => {
+    setWakeName(profile?.assistant)
+    // And says it as a word, not letter by letter.
+    setSpokenName(profile?.assistant ?? 'MORPHA')
+  }, [profile?.assistant])
   const history = useRef<Msg[]>([])
   const speaker = useRef<ReturnType<typeof createSpeaker> | null>(null)
   const voice = useRef<Voice | null>(null)

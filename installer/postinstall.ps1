@@ -1,4 +1,4 @@
-# J.A.R.V.I.S. setup — the part a file copy cannot do. Run by the installer
+# M.O.R.P.H.A. setup — the part a file copy cannot do. Run by the installer
 # (installer\jarvis.iss) once the files are in place: hidden, one step at a
 # time (-Only), so the setup window shows the progress like any installer and
 # no console window appears. Problems go to -Results ("PROBLEM|..." lines),
@@ -96,14 +96,14 @@ $vosk = Join-Path $data 'vosk'
 Refresh-Path
 
 if ($Only -eq 'All' -or $Only -eq 'Node') {
-  Write-Host 'J.A.R.V.I.S. setup' -ForegroundColor White
+  Write-Host 'M.O.R.P.H.A. setup' -ForegroundColor White
   Write-Host 'Copyright (C) 2026 Sujith M. Based on JARVIS by Aditya Dewaskar. MIT License.' -ForegroundColor DarkGray
   Write-Host "Installing into $App"
 }
 
 # Node.js runs JARVIS.
 if (Want 'Node') {
-  Step 'Node.js (runs J.A.R.V.I.S.)'
+  Step 'Node.js (runs M.O.R.P.H.A.)'
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Winget-Install 'OpenJS.NodeJS.LTS' 'Node.js LTS' }
   if (Get-Command node -ErrorAction SilentlyContinue) { Ok ('Node.js ' + (& node --version)) }
   else { Problem 'Node.js is not installed. Get it from https://nodejs.org, then run the setup file again.' }
@@ -111,7 +111,7 @@ if (Want 'Node') {
 
 # Chrome is JARVIS's window.
 if (Want 'Chrome') {
-  Step 'Google Chrome (the J.A.R.V.I.S. window)'
+  Step 'Google Chrome (the M.O.R.P.H.A. window)'
   function Find-Chrome {
     foreach ($k in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe') {
       $p = (Get-ItemProperty $k -ErrorAction SilentlyContinue).'(default)'
@@ -134,7 +134,7 @@ if (Want 'Ffmpeg') {
 
 # JARVIS's own packages.
 if (Want 'Packages') {
-  Step 'J.A.R.V.I.S. packages'
+  Step 'M.O.R.P.H.A. packages'
   if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
     Push-Location $App
     & npm.cmd ci --no-audit --no-fund 2>&1 | Out-Host
@@ -147,7 +147,7 @@ if (Want 'Packages') {
 # Python: voice, documents, charts, the free AI accounts (LiteLLM).
 if (Want 'Python') {
   Step 'Python (voice, documents, free AI accounts)'
-  # Python 3.11 is what J.A.R.V.I.S. is built and tested on; 3.12 and 3.10 also
+  # Python 3.11 is what M.O.R.P.H.A. is built and tested on; 3.12 and 3.10 also
   # work for its packages, so one of those already on the PC is used if 3.11
   # cannot be installed.
   function Find-Python([string[]]$versions) {
@@ -166,7 +166,7 @@ if (Want 'Python') {
   if (-not (Test-Path $vpy)) {
     $py = Find-Python @('3.11')
     if (-not $py) { Winget-Install 'Python.Python.3.11' 'Python 3.11' @('--scope', 'user'); $py = Find-Python @('3.11', '3.12', '3.10') }
-    if ($py) { Info "creating J.A.R.V.I.S.'s Python environment ($py)..."; & $py -m venv $venv | Out-Host }
+    if ($py) { Info "creating M.O.R.P.H.A.'s Python environment ($py)..."; & $py -m venv $venv | Out-Host }
   }
   if (Test-Path $vpy) {
     $pkgs = @('numpy', 'edge-tts', 'litellm[proxy]', 'python-docx', 'python-pptx', 'openpyxl', 'matplotlib', 'pandas',
@@ -183,11 +183,30 @@ if (Want 'Python') {
   } else { Problem 'Python 3.11 is not installed. Get it from https://www.python.org (version 3.11), then run the setup file again.' }
 }
 
-# "Hey Jarvis": the small speech model that listens for the name.
+# "Hey Morpha": the small speech model that listens for the name.
 if ((Want 'WakeModel') -and ($Listener -or $Offline)) {
-  Step '"Hey Jarvis" speech model'
+  Step '"Hey Morpha" speech model'
   if (Test-Path (Join-Path $vosk 'vosk-model-small-en-in-0.4')) { Ok 'already there' }
   elseif (Get-Zip 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip' $vosk 'the small Indian-English model (about 40 MB)') { Ok 'downloaded' }
+  # Whisper base.en: checks the name the small model is unsure of ("Morpha"
+  # is not a word it knows). The same files faster-whisper's download_model
+  # fetches.
+  $wb = Join-Path $data 'whisper\base.en'
+  if (Test-Path (Join-Path $wb 'model.bin')) { Ok 'name checker (Whisper base.en) already there' }
+  else {
+    New-Item -ItemType Directory -Force -Path $wb | Out-Null
+    try {
+      foreach ($f in 'config.json', 'tokenizer.json', 'vocabulary.txt', 'model.bin') {
+        $label = if ($f -eq 'model.bin') { 'the name checker (Whisper base.en)' } else { "Whisper base.en $f" }
+        Get-File "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/$f" (Join-Path $wb "$f.part") $label
+        Move-Item -Force (Join-Path $wb "$f.part") (Join-Path $wb $f)
+      }
+      Ok 'name checker (Whisper base.en) downloaded'
+    } catch {
+      Get-ChildItem $wb -Filter '*.part' -ErrorAction SilentlyContinue | Remove-Item -Force
+      Problem "The name checker (Whisper base.en) could not be downloaded; the wake word will be less reliable. Run the setup file again to retry."
+    }
+  }
 }
 
 # Offline mode: speech (Whisper, large Vosk) and answers (Ollama).
@@ -262,40 +281,40 @@ if ((Want 'Offline') -and $Offline) {
       $rd.Close()
     } catch { Info "Ollama's API did not answer: $($_.Exception.Message)" }
     if (-not $pulled) { & $exe pull qwen3:4b-instruct 2>&1 | Out-Host; $pulled = ($LASTEXITCODE -eq 0) }
-    if ($pulled) { Ok 'offline model ready (J.A.R.V.I.S. starts Ollama only when it is needed)' }
+    if ($pulled) { Ok 'offline model ready (M.O.R.P.H.A. starts Ollama only when it is needed)' }
     else { Problem 'The offline model could not be downloaded. Later, run:  ollama pull qwen3:4b-instruct' }
     if ($srv) { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue }
   } else { Problem 'Ollama is not installed (offline answers). Get it from https://ollama.com, then run the setup file again.' }
 }
 
-# The desktop switches: "JARVIS - ON / OFF" (the kill switch: J.A.R.V.I.S.
-# and the "Hey Jarvis" listener on or off, remembered across restarts) and
-# "JARVIS Popup - ON / OFF" (the small popup as his face, or the main
+# The desktop switches: "MORPHA - ON / OFF" (the kill switch: M.O.R.P.H.A.
+# and the "Hey Morpha" listener on or off, remembered across restarts) and
+# "MORPHA Popup - ON / OFF" (the small popup as its face, or the main
 # window). The kill switch also keeps the sign-in entry, so listening from
 # sign-in needs it too.
 if ((Want 'Switches') -and ($JarvisSwitch -or $Autostart)) {
-  Step 'JARVIS ON / OFF switch (kill switch)'
+  Step 'MORPHA ON / OFF switch (kill switch)'
   $switch = Join-Path $App 'scripts\jarvis-switch.ps1'
   $flag = Join-Path $data 'disabled'
   # Listening from sign-in not chosen: the switch starts OFF (one double-click turns it on).
   if (-not $Autostart -and -not (Test-Path $flag)) { Set-Content -Path $flag -Value 'off until switched on (setup)' -Encoding utf8 }
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $switch -Install | Out-Null
   # Checked, not assumed: the shortcut must really be on the desktop.
-  if (Get-ChildItem (Join-Path ([Environment]::GetFolderPath('Desktop')) 'JARVIS Kill Switch') -Filter 'JARVIS - O*.lnk' -ErrorAction SilentlyContinue) {
-    Ok 'the "JARVIS - ON / OFF" switch is in the "JARVIS Kill Switch" folder on the desktop (and in the Start menu)'
-  } else { Problem 'The "JARVIS - ON / OFF" switch could not be put on the desktop; it is still in the Start menu.' }
+  if (Get-ChildItem (Join-Path ([Environment]::GetFolderPath('Desktop')) 'MORPHA Kill Switch') -Filter 'MORPHA - O*.lnk' -ErrorAction SilentlyContinue) {
+    Ok 'the "MORPHA - ON / OFF" switch is in the "MORPHA Kill Switch" folder on the desktop (and in the Start menu)'
+  } else { Problem 'The "MORPHA - ON / OFF" switch could not be put on the desktop; it is still in the Start menu.' }
   if ($Autostart) {
     Remove-Item $flag -Force -ErrorAction SilentlyContinue
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $switch -Boot | Out-Null
-    Ok 'listening for "Hey Jarvis" now, and from every sign-in'
+    Ok 'listening for "Hey Morpha" now, and from every sign-in'
   }
 }
 if ((Want 'Switches') -and $PopupSwitch) {
-  Step 'JARVIS Popup ON / OFF switch'
+  Step 'MORPHA Popup ON / OFF switch'
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File (Join-Path $App 'scripts\popup-switch.ps1') -Install | Out-Null
-  if (Get-ChildItem (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Popup Kill Switch') -Filter 'JARVIS Popup - O*.lnk' -ErrorAction SilentlyContinue) {
-    Ok 'the "JARVIS Popup - ON / OFF" switch is in the "Popup Kill Switch" folder on the desktop (and in the Start menu)'
-  } else { Problem 'The "JARVIS Popup - ON / OFF" switch could not be put on the desktop; it is still in the Start menu.' }
+  if (Get-ChildItem (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Popup Kill Switch') -Filter 'MORPHA Popup - O*.lnk' -ErrorAction SilentlyContinue) {
+    Ok 'the "MORPHA Popup - ON / OFF" switch is in the "Popup Kill Switch" folder on the desktop (and in the Start menu)'
+  } else { Problem 'The "MORPHA Popup - ON / OFF" switch could not be put on the desktop; it is still in the Start menu.' }
 }
 
 if ($Only -eq 'All') {
@@ -303,7 +322,7 @@ if ($Only -eq 'All') {
   if ($problems.Count) {
     Write-Host 'Setup finished, with some things to fix:' -ForegroundColor Yellow
     foreach ($p in $problems) { Write-Host "  - $p" -ForegroundColor Yellow }
-  } else { Write-Host 'Setup finished. J.A.R.V.I.S. is ready.' -ForegroundColor Green }
+  } else { Write-Host 'Setup finished. M.O.R.P.H.A. is ready.' -ForegroundColor Green }
 }
 try { Stop-Transcript | Out-Null } catch {}
 # Run by hand (-Only All) in a console: keep the window to read the result.

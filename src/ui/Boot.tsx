@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore } from '../store'
+import { assistantTitle, useProfile } from '../custom/kit'
 
 /**
  * The start-up sequence, rebuilt to the Iron Man boot it is quoting.
@@ -122,6 +123,7 @@ export function Boot() {
 
 /** Concentric reticle rings drawing inward, with the name resolving last. */
 function Rings({ reduced }: { reduced: boolean }) {
+  const profile = useProfile()
   const ease = 'easeOut'
   const ring = (r: number, delay: number, dash: string, w = 1) => (
     <motion.circle
@@ -153,7 +155,7 @@ function Rings({ reduced }: { reduced: boolean }) {
         animate={{ opacity: 1, letterSpacing: '0.42em' }}
         transition={{ duration: 0.7, delay: 0.5, ease }}
       >
-        J.A.R.V.I.S
+        {assistantTitle(profile).replace(/\.$/, '')}
       </motion.text>
     </svg>
   )

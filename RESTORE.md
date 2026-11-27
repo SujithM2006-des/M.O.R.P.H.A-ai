@@ -1,4 +1,4 @@
-# Restoring J.A.R.V.I.S. from the backup
+# Restoring M.O.R.P.H.A. from the backup
 
 This project is backed up, with its full history, at
 **https://github.com/SujithM2006-des/JARVIS_BACKUP** (branch `main`). The
@@ -21,15 +21,15 @@ Then:
    says where each part goes (`%USERPROFILE%\.jarvis`, `Pictures\Jarvis`,
    `Videos\Jarvis`).
 2. **AI keys**: copy `.env.example` to `.env.local` and fill it in, or sign in
-   again from J.A.R.V.I.S.'s Customize screen (Gemini, OpenRouter, Groq).
-3. **The "Hey Jarvis" listener and offline speech**: see README.md, "The Hey
+   again from M.O.R.P.H.A.'s Customize screen (Gemini, OpenRouter, Groq).
+3. **The "Hey Morpha" listener and offline speech**: see README.md, "The Hey
    Jarvis wake word and the desktop switch".
 4. Start it: `start-jarvis.bat` (or `npm start -- --writes`). Say "health
    check" — it lists anything still missing and how to fix it.
 
 ## Or install it the easy way
 
-The setup file builds the same J.A.R.V.I.S. onto any Windows PC:
+The setup file builds the same M.O.R.P.H.A. onto any Windows PC:
 https://github.com/SujithM2006-des/JARVIS_INSTALLER — or build it from
 `installer\` here (`installer\build.ps1`).
 

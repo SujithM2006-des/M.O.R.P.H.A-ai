@@ -31,15 +31,17 @@ function Set-Shortcut([bool]$on) {
   $desktop = [Environment]::GetFolderPath('Desktop')
   $folder = Join-Path $desktop 'Popup Kill Switch'
   New-Item -ItemType Directory -Force -Path $folder | Out-Null
-  Get-ChildItem $desktop, $folder -Filter 'JARVIS Popup - O*.lnk' -ErrorAction SilentlyContinue | Remove-Item -Force
-  $name = if ($on) { 'JARVIS Popup - ON.lnk' } else { 'JARVIS Popup - OFF.lnk' }
+  # Also the ones from before the rename (J.A.R.V.I.S.).
+  Get-ChildItem $desktop, $folder -Filter '*Popup - O*.lnk' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like 'MORPHA Popup - O*' -or $_.Name -like 'JARVIS Popup - O*' } | Remove-Item -Force
+  $name = if ($on) { 'MORPHA Popup - ON.lnk' } else { 'MORPHA Popup - OFF.lnk' }
   $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $folder $name))
   $s.TargetPath = "$env:SystemRoot\System32\wscript.exe"
   $s.Arguments = '"' + (Join-Path $PSScriptRoot 'popup-switch.vbs') + '"'
   $s.WorkingDirectory = $root
   $icon = if ($on) { $iconOn } else { $iconOff }
   if (Test-Path $icon) { $s.IconLocation = "$icon,0" }
-  $s.Description = if ($on) { 'JARVIS popup is ON - double-click to close it' } else { 'JARVIS popup is OFF - double-click to bring it back' }
+  $s.Description = if ($on) { 'M.O.R.P.H.A. popup is ON - double-click to close it' } else { 'M.O.R.P.H.A. popup is OFF - double-click to bring it back' }
   $s.Save()
 }
 
@@ -66,14 +68,14 @@ function Stop-Popup {
 # within 3 seconds (measured), but keeps one it restored itself.
 function Restore-Main {
   Add-Type -Namespace JarvisSwitch -Name Win -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindow(string c, string t); [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);'
-  # Titled with the assistant's name (setup can rename him); else the default.
-  $title = 'J.A.R.V.I.S.'
-  try {
-    $a = ([IO.File]::ReadAllText((Join-Path $dir 'profile.json')) | ConvertFrom-Json).assistant
-    if ($a -and "$a".Trim().ToUpper() -ne 'JARVIS') { $title = "$a".Trim().ToUpper() }
-  } catch {}
+  # Titled with the assistant's name (setup can rename it), written with a dot
+  # after every letter: the rule of dottedName() in bridge/profile.mjs.
+  $a = $null
+  try { $a = ([IO.File]::ReadAllText((Join-Path $dir 'profile.json')) | ConvertFrom-Json).assistant } catch {}
+  $a = ("$a" -replace '\.+', '' -replace '\s+', ' ').Trim(); if (-not $a) { $a = 'MORPHA' }
+  $title = ($a.ToUpper() -split ' ' | ForEach-Object { (($_.ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) }) -join '.') + '.' }) -join ' '
   $h = [JarvisSwitch.Win]::FindWindow([NullString]::Value, $title)
-  if ($h -eq [IntPtr]::Zero) { $h = [JarvisSwitch.Win]::FindWindow([NullString]::Value, 'J.A.R.V.I.S.') }
+  if ($h -eq [IntPtr]::Zero) { $h = [JarvisSwitch.Win]::FindWindow([NullString]::Value, 'M.O.R.P.H.A.') }  # the loading screen
   if ($h -ne [IntPtr]::Zero) { [void][JarvisSwitch.Win]::PostMessage($h, 0x112, [IntPtr]0xF120, [IntPtr]::Zero) }  # WM_SYSCOMMAND, SC_RESTORE
 }
 
@@ -88,13 +90,13 @@ if (Test-Path $mode) {
   Stop-Popup
   Restore-Main
   Set-Shortcut $false
-  Show-Toast 'JARVIS popup is OFF' 'JARVIS keeps running in his own window. Double-click the switch to bring the popup back.'
+  Show-Toast 'M.O.R.P.H.A. popup is OFF' 'M.O.R.P.H.A. keeps running in its own window. Double-click the switch to bring the popup back.'
 } else {
   # ON.
   Set-Content -Path $mode -Value "on $(Get-Date -Format s)" -Encoding ascii
   Set-Shortcut $true
   if (Test-Path $jarvisOff) {
-    Show-Toast 'JARVIS popup is ON' 'It will appear when JARVIS is switched on.'
+    Show-Toast 'M.O.R.P.H.A. popup is ON' 'It will appear when M.O.R.P.H.A. is switched on.'
     return
   }
   try {
@@ -105,5 +107,5 @@ if (Test-Path $mode) {
     # Not running: start him in popup mode.
     Start-Process -FilePath cmd.exe -ArgumentList '/c', "`"$root\start-jarvis.bat`"" -WorkingDirectory $root -WindowStyle Hidden
   }
-  Show-Toast 'JARVIS popup is ON' 'The popup is the face of JARVIS now. Double-click the switch to close it.'
+  Show-Toast 'M.O.R.P.H.A. popup is ON' 'The popup is the face of M.O.R.P.H.A. now. Double-click the switch to close it.'
 }

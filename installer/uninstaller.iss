@@ -1,7 +1,7 @@
-; J.A.R.V.I.S. — standalone uninstaller (Inno Setup 6): JARVIS-Uninstall.exe
+; M.O.R.P.H.A. — standalone uninstaller (Inno Setup 6): MORPHA-Uninstall.exe
 ;
-; A small file to share next to the setup file. It removes J.A.R.V.I.S. from
-; the PC — the copy JARVIS-Setup installed and any other J.A.R.V.I.S. folder
+; A small file to share next to the setup file. It removes M.O.R.P.H.A. from
+; the PC — the copy MORPHA-Setup installed and any other M.O.R.P.H.A. folder
 ; (installer\remove-jarvis.ps1 does the work, hidden) — and keeps the user's
 ; memory and personal files, so a reinstall remembers them.
 ;
@@ -10,9 +10,9 @@
 ; console window. It installs nothing and never touches the setup file, and
 ; keeps Node.js, Python, Chrome, ffmpeg and Ollama (other programs use them).
 ;
-;   JARVIS-Uninstall.exe              the wizard
-;   JARVIS-Uninstall.exe /SILENT      just the progress bar
-;   JARVIS-Uninstall.exe /VERYSILENT  nothing shown (memory is still kept)
+;   MORPHA-Uninstall.exe              the wizard
+;   MORPHA-Uninstall.exe /SILENT      just the progress bar
+;   MORPHA-Uninstall.exe /VERYSILENT  nothing shown (memory is still kept)
 
 #ifndef AppVersion
   #define AppVersion "2.0.0"
@@ -24,7 +24,7 @@
   #define OutDir "."
 #endif
 
-#define AppName "J.A.R.V.I.S."
+#define AppName "M.O.R.P.H.A."
 
 [Setup]
 AppId={{B7D41C2E-5F83-4A96-8E1B-3C9F0A6D2E57}
@@ -34,12 +34,12 @@ AppPublisher=Sujith M
 AppCopyright=Copyright (C) 2026 Sujith M. MIT License.
 VersionInfoVersion={#AppVersion}
 VersionInfoCompany=Sujith M
-VersionInfoDescription={#AppName} Uninstaller - removes J.A.R.V.I.S. from this PC
+VersionInfoDescription={#AppName} Uninstaller - removes M.O.R.P.H.A. from this PC
 VersionInfoCopyright=Copyright (C) 2026 Sujith M
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
 OutputDir={#OutDir}
-OutputBaseFilename=JARVIS-Uninstall
+OutputBaseFilename=MORPHA-Uninstall
 SetupIconFile={#Stage}\jarvis.ico
 WizardImageFile={#Stage}\wizard.bmp
 WizardSmallImageFile={#Stage}\wizard-small.bmp
@@ -58,22 +58,22 @@ MinVersion=10.0
 Source: "remove-jarvis.ps1"; Flags: dontcopy
 
 [Messages]
-SetupAppTitle=Uninstall J.A.R.V.I.S.
-SetupWindowTitle=Uninstall J.A.R.V.I.S.
-WelcomeLabel1=Uninstall J.A.R.V.I.S.
-WelcomeLabel2=This will remove J.A.R.V.I.S. from your computer.%n%nYour memory and personal files are kept, so if you install J.A.R.V.I.S. again, it remembers you.%n%nThe J.A.R.V.I.S. setup file is not touched.%n%nClick Next to see what will be removed.
+SetupAppTitle=Uninstall M.O.R.P.H.A.
+SetupWindowTitle=Uninstall M.O.R.P.H.A.
+WelcomeLabel1=Uninstall M.O.R.P.H.A.
+WelcomeLabel2=This will remove M.O.R.P.H.A. from your computer.%n%nYour memory and personal files are kept, so if you install M.O.R.P.H.A. again, it remembers you.%n%nThe M.O.R.P.H.A. setup file is not touched.%n%nClick Next to see what will be removed.
 WizardReady=Ready to Uninstall
-ReadyLabel1=J.A.R.V.I.S. is ready to be removed from your computer.
+ReadyLabel1=M.O.R.P.H.A. is ready to be removed from your computer.
 ReadyLabel2a=Click Uninstall to remove it, or click Back to review.
 ReadyLabel2b=Click Uninstall to remove it, or click Back to review.
 ButtonInstall=&Uninstall
 WizardInstalling=Uninstalling
-InstallingLabel=Please wait while J.A.R.V.I.S. is removed from your computer.
-FinishedHeadingLabel=J.A.R.V.I.S. has been removed
-FinishedLabelNoIcons=J.A.R.V.I.S. was removed from your computer.
+InstallingLabel=Please wait while M.O.R.P.H.A. is removed from your computer.
+FinishedHeadingLabel=M.O.R.P.H.A. has been removed
+FinishedLabelNoIcons=M.O.R.P.H.A. was removed from your computer.
 ClickFinish=Click Finish to close.
 ExitSetupTitle=Exit Uninstall
-ExitSetupMessage=J.A.R.V.I.S. has not been removed.%n%nExit the uninstaller?
+ExitSetupMessage=M.O.R.P.H.A. has not been removed.%n%nExit the uninstaller?
 
 [Code]
 var
@@ -129,7 +129,7 @@ begin
   Result := RunScript('-Mode Scan', Scan) and ((Pick('INSTALLED', '', '') <> '') or (Pick('COPY', '', '') <> ''));
   if not Result then
     if not WizardSilent then
-      MsgBox('J.A.R.V.I.S. is not on this computer (for this Windows account), so there is nothing to remove.', mbInformation, MB_OK);
+      MsgBox('M.O.R.P.H.A. is not on this computer (for this Windows account), so there is nothing to remove.', mbInformation, MB_OK);
 end;
 
 { "Ready to Uninstall": what goes and what stays. }
@@ -139,15 +139,15 @@ var
   S: String;
 begin
   S := 'Will be removed:' + NewLine;
-  if Pick('INSTALLED', '', '') <> '' then S := S + Space + 'J.A.R.V.I.S. installed in ' + Pick('INSTALLED', '', '') + NewLine;
-  if Pick('COPY', '', '') <> '' then S := S + Pick('COPY', Space + 'the J.A.R.V.I.S. folder ', NewLine) + NewLine;
-  S := S + Space + 'the desktop switches and the "Hey Jarvis" sign-in entry' + NewLine +
+  if Pick('INSTALLED', '', '') <> '' then S := S + Space + 'M.O.R.P.H.A. installed in ' + Pick('INSTALLED', '', '') + NewLine;
+  if Pick('COPY', '', '') <> '' then S := S + Pick('COPY', Space + 'the M.O.R.P.H.A. folder ', NewLine) + NewLine;
+  S := S + Space + 'the desktop switches and the "Hey Morpha" sign-in entry' + NewLine +
            Space + 'the Start menu entries' + NewLine +
-           Space + 'J.A.R.V.I.S.''s downloads: voice models, its Python, its Chrome logins, logs' + NewLine + NewLine +
+           Space + 'M.O.R.P.H.A.''s downloads: voice models, its Python, its Chrome logins, logs' + NewLine + NewLine +
        'Kept (so a reinstall remembers you):' + NewLine +
            Space + 'your memory and personal files: ' + Pick('DATA_KEEP', '', '') + NewLine + NewLine +
        'Not touched:' + NewLine +
-           Space + 'the J.A.R.V.I.S. setup file and your backups' + NewLine +
+           Space + 'the M.O.R.P.H.A. setup file and your backups' + NewLine +
            Space + 'Node.js, Python, Chrome, ffmpeg and Ollama (other programs may use them)';
   Result := S;
 end;
@@ -173,12 +173,12 @@ begin
   Done := '';
   N := 5;
   Keep := SetTimer(0, 0, 250, CreateCallback(@KeepMinimizable));
-  Progress(0, N, 'Stopping J.A.R.V.I.S....');
+  Progress(0, N, 'Stopping M.O.R.P.H.A....');
   RunScript(Common + ' -Only Stop', Lines);
-  Progress(1, N, 'Removing the installed J.A.R.V.I.S....');
+  Progress(1, N, 'Removing the installed M.O.R.P.H.A....');
   RunScript(Common + ' -Only Installed', Lines);
   for I := 0 to GetArrayLength(Lines) - 1 do Done := Done + Lines[I] + #13#10;
-  Progress(2, N, 'Removing other J.A.R.V.I.S. folders...');
+  Progress(2, N, 'Removing other M.O.R.P.H.A. folders...');
   RunScript(Common + ' -Only Copies', Lines);
   for I := 0 to GetArrayLength(Lines) - 1 do Done := Done + Lines[I] + #13#10;
   Progress(3, N, 'Removing shortcuts...');
@@ -195,6 +195,6 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
-    WizardForm.FinishedLabel.Caption := 'J.A.R.V.I.S. was removed from your computer.' + #13#10#13#10 + Done + #13#10 +
-      'To use J.A.R.V.I.S. again, run the J.A.R.V.I.S. setup file - it will remember you.';
+    WizardForm.FinishedLabel.Caption := 'M.O.R.P.H.A. was removed from your computer.' + #13#10#13#10 + Done + #13#10 +
+      'To use M.O.R.P.H.A. again, run the M.O.R.P.H.A. setup file - it will remember you.';
 end;

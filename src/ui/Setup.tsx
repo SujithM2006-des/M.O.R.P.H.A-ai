@@ -10,7 +10,7 @@ import {
   setVoiceProfile,
   STANDARD_VOICES,
 } from '../lib/tts'
-import { assistantTitle, dottedName, refreshProfile, spokenName, useProfile, type Profile } from '../custom/kit'
+import { assistantTitle, dottedName, refreshProfile, saidName, spokenName, useProfile, type Profile } from '../custom/kit'
 
 /** "JARVIS" -> "Jarvis", for showing how the name is said. */
 const nameWord = (s: string) => s.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_m, a, b) => a + b.toUpperCase())
@@ -99,6 +99,7 @@ function applyTheme(id: string | undefined) {
 
 export function Setup() {
   const profile = useProfile()
+  const who = saidName(profile)
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<Profile | null>(null)
   const [voice, setVoice] = useState('')
@@ -207,7 +208,7 @@ export function Setup() {
         body: JSON.stringify({ providers: [id] }),
       })
     } catch {
-      setError('JARVIS is not running, so that sign-in could not start.')
+      setError(`${who} is not running, so that sign-in could not start.`)
       return
     }
     await loadAccounts()
@@ -243,9 +244,9 @@ export function Setup() {
     try {
       const r = await fetch(`${BRIDGE_HTTP_URL}/checkup`, { cache: 'no-store' })
       if (r.ok) setCheckItems((await r.json()).items)
-      else setCheckItems([{ name: 'JARVIS', ok: false, note: `The check-up failed (${r.status}).` }])
+      else setCheckItems([{ name: who, ok: false, note: `The check-up failed (${r.status}).` }])
     } catch {
-      setCheckItems([{ name: 'JARVIS', ok: false, note: "JARVIS isn't running — start him, then check again." }])
+      setCheckItems([{ name: who, ok: false, note: `${who} isn't running — start it, then check again.` }])
     } finally {
       setChecking(false)
     }
@@ -319,7 +320,7 @@ export function Setup() {
       }
     } catch {
       setSaving('')
-      setError('JARVIS is not running, so this could not be saved.')
+      setError(`${who} is not running, so this could not be saved.`)
     }
   }
 
@@ -354,7 +355,7 @@ export function Setup() {
               <input
                 value={form.assistant}
                 maxLength={40}
-                placeholder="J.A.R.V.I.S."
+                placeholder="M.O.R.P.H.A."
                 onChange={(e) => set({ assistant: e.target.value })}
                 onBlur={() => set({ assistant: dottedName(form.assistant) })}
               />
@@ -524,9 +525,9 @@ export function Setup() {
           <div className="su-field">
             <span>AI accounts</span>
             <small>
-              No Claude subscription needed: JARVIS thinks with Gemini, OpenRouter or Groq — all free — and uses Claude
-              too if you have it. Leave the model on Auto and he switches by himself when one is unavailable or at its
-              limit. ChatGPT draws story characters. A window opens to sign in; JARVIS sets up the rest. Nothing to copy or
+              No Claude subscription needed: {who} thinks with Gemini, OpenRouter or Groq — all free — and uses Claude
+              too if you have it. Leave the model on Auto and it switches by itself when one is unavailable or at its
+              limit. ChatGPT draws story characters. A window opens to sign in; {who} sets up the rest. Nothing to copy or
               paste.
             </small>
             {/* Nothing to think with yet: say so plainly, before the list. */}
@@ -657,7 +658,7 @@ export function Setup() {
         </div>
 
         <footer className="su-foot">
-          <span className="su-credit">J.A.R.V.I.S. · created by <b>{profile?.creator ?? 'Sujith M'}</b></span>
+          <span className="su-credit">{assistantTitle(profile)} · created by <b>{profile?.creator ?? 'Sujith M'}</b></span>
           <span className="su-actions">
             {saving && <span className="su-saving">{saving}</span>}
             {firstRun ? (

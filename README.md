@@ -1,9 +1,9 @@
-# J.A.R.V.I.S. — a personal desktop assistant for Windows
+# M.O.R.P.H.A. — a personal desktop assistant for Windows
 
 **Created by Sujith M.**
 
 A voice assistant with an Iron Man–style interface that actually runs your PC.
-Say **"Hey Jarvis"** — even when he's switched off — and he opens, listens, and
+Say **"Hey Morpha"** — even when he's switched off — and he opens, listens, and
 gets on with it: opening apps and folders, finding and moving files, sending
 WhatsApp messages and files, setting reminders, reading your screen, checking
 your mail and calendar, and answering like the JARVIS from the films.
@@ -11,8 +11,8 @@ your mail and calendar, and answering like the JARVIS from the films.
 The face is a web page (React + Vite + Three.js) in its own Chrome window. The
 brain runs through the Claude Agent SDK, and **no Claude subscription is
 needed**: sign in to Gemini, OpenRouter or Groq in setup (free, with your Google
-account — no key to copy) and Jarvis thinks with those. If you do have a Claude
-plan, sign in once in Claude Code and Jarvis uses Claude first, switching to the
+account — no key to copy) and Morpha thinks with those. If you do have a Claude
+plan, sign in once in Claude Code and Morpha uses Claude first, switching to the
 free AIs by himself when Claude is at its limit or signed out. With no internet,
 a local model (Ollama) answers. Claude-only extras: Gmail, Calendar & Drive
 through your Claude account.
@@ -43,20 +43,20 @@ through your Claude account.
 - **Memory** — "remember that my exam is on the 20th"; he remembers across restarts
 - **Reminders and timers** — spoken aloud with a Windows notification
 - **Scheduled WhatsApp messages** — "wish Sarah happy birthday at 12 am"
-- **Weather**, and a **morning briefing** ("good morning, Jarvis")
+- **Weather**, and a **morning briefing** ("good morning, Morpha")
 - **Gmail and Google Calendar** through your Claude account's connectors
 
 **Circle to Search**
 - Say "circle to search" (or click ◯ on the onscreen panel), draw around
-  anything on screen, and JARVIS tells you what it is and looks it up
+  anything on screen, and M.O.R.P.H.A. tells you what it is and looks it up
 
-**Onscreen JARVIS**
+**Onscreen M.O.R.P.H.A.**
 - "Turn on onscreen jarvis" opens a compact, always-on-top panel in the corner,
   like Copilot: live status, what he heard, his answer, a box to type in, and
   Circle to Search. Its ✕ closes only the panel; "turn off onscreen jarvis" too
 
 **The experience**
-- **"Hey Jarvis" works like "Hey Google"** — an offline wake-word detector
+- **"Hey Morpha" works like "Hey Google"** — an offline wake-word detector
   answers in a fraction of a second, chimes, and listens. It cuts through him
   mid-sentence, and it **starts him when he's off**.
 - A **desktop ON/OFF switch** — nothing starts with Windows; the switch arms him
@@ -74,7 +74,7 @@ through your Claude account.
   then run `claude` once and log in. Usage is billed to your Claude account.
 - **Node.js 20+** — <https://nodejs.org>
 - **Google Chrome**
-- **Python 3.10+** — only for the offline "Hey Jarvis" wake word and the
+- **Python 3.10+** — only for the offline "Hey Morpha" wake word and the
   ON/OFF switch. Everything else works without it.
 - *Optional:* an **NVIDIA GPU** for the neural Kokoro voice, and an
   **ElevenLabs API key** for a premium voice and transcription.
@@ -85,9 +85,9 @@ through your Claude account.
 
 ### The easy way: the setup file
 
-Run **`JARVIS-Setup-2.0.0.exe`** — a normal Windows installer (no admin
+Run **`MORPHA-Setup-2.0.0.exe`** — a normal Windows installer (no admin
 needed). It shows the licence, lets you choose Standard (online, with the
-"Hey Jarvis" wake word), Full (also works offline) or Minimal, installs what is
+"Hey Morpha" wake word), Full (also works offline) or Minimal, installs what is
 missing (Node.js, Python 3.11, Chrome, ffmpeg, and Ollama for offline mode)
 through Windows' own installer, downloads the packages and speech models, and
 adds Start menu and desktop shortcuts. Uninstall it from Windows Settings →
@@ -98,7 +98,7 @@ To build the setup file yourself (needs Inno Setup 6:
 `winget install JRSoftware.InnoSetup --scope user`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\build.ps1   # -> Downloads\jarvis final\JARVIS-Setup-2.0.0.exe
+powershell -ExecutionPolicy Bypass -File installer\build.ps1   # -> Downloads\jarvis final\MORPHA-Setup-2.0.0.exe
 ```
 
 It packages only the files in git, so `.env.local` and your own look never get
@@ -122,7 +122,7 @@ VITE_SPEECH_LANG=en-IN
 VITE_MUSIC_AMBIENT=off
 ```
 
-### The "Hey Jarvis" wake word and the desktop switch
+### The "Hey Morpha" wake word and the desktop switch
 
 The wake word runs in its own small Python environment:
 
@@ -143,7 +143,7 @@ Expand-Archive "$dir\model.zip" -DestinationPath $dir; Remove-Item "$dir\model.z
 
 Recommended for voice commands **without the internet**: Whisper (~460 MB),
 which understands real speech far better than Vosk. With it, Vosk only listens
-for "Hey Jarvis" and Whisper reads the command (about 3 s on a laptop CPU):
+for "Hey Morpha" and Whisper reads the command (about 3 s on a laptop CPU):
 
 ```bat
 "%USERPROFILE%\.jarvis\wake-venv\Scripts\python.exe" -m pip install faster-whisper
@@ -159,16 +159,16 @@ Then put the switch on your desktop:
 powershell -ExecutionPolicy Bypass -File scripts\jarvis-switch.ps1 -Install
 ```
 
-Double-click **"JARVIS - ON / OFF"** on the desktop to arm or disarm him.
+Double-click **"MORPHA - ON / OFF"** on the desktop to arm or disarm him.
 
 ### Making it yours
 
-The first time JARVIS starts, a setup screen asks:
+The first time M.O.R.P.H.A. starts, a setup screen asks:
 
 - **Your name** — what he calls you — and **your city**, for weather when
   Windows location is off.
 - **The assistant's name** — rename him if you like ("Friday"). The wake
-  phrase stays "Hey Jarvis".
+  phrase stays "Hey Morpha".
 - **Voice** and **colour**.
 - **Features** — switch PC control, the browser, WhatsApp or the camera off if
   you don't want them.
@@ -180,7 +180,7 @@ yours is in this repository, and nothing of anyone else's is in your copy.
 For the brain, sign in to **your own** Claude Code account (`claude` in a
 terminal) — every copy uses its owner's account.
 
-JARVIS was created by **Sujith M**. That is fixed in the code
+M.O.R.P.H.A. was created by **Sujith M**. That is fixed in the code
 (`bridge/profile.mjs`), not a setting, and he will always say so.
 
 ---
@@ -188,8 +188,8 @@ JARVIS was created by **Sujith M**. That is fixed in the code
 ## Running it
 
 - **Double-click `start-jarvis.bat`** — the loading screen opens instantly and
-  hands over to JARVIS once he's ready, or
-- **switch him ON** with the desktop switch and just say **"Hey Jarvis"**.
+  hands over to M.O.R.P.H.A. once he's ready, or
+- **switch him ON** with the desktop switch and just say **"Hey Morpha"**.
 
 The first time, Chrome asks for the microphone — allow it. WhatsApp shows a QR
 code the first time you use it — scan it with your phone (WhatsApp → Settings →
@@ -197,7 +197,7 @@ Linked devices).
 
 > `start-jarvis.bat` runs the bridge with **actions enabled** (`--writes`), so he
 > can open apps, change files and send messages. Use `npm start` instead for a
-> read-only JARVIS.
+> read-only M.O.R.P.H.A.
 
 ---
 
@@ -205,17 +205,17 @@ Linked devices).
 
 | Key / phrase | Does |
 |---|---|
-| **"Hey Jarvis"** | Wake him — chime, then speak your request |
-| Say "Hey Jarvis" while he talks | Stop him and listen |
+| **"Hey Morpha"** | Wake him — chime, then speak your request |
+| Say "Hey Morpha" while he talks | Stop him and listen |
 | **"Turn on onscreen jarvis"** / **"turn off onscreen jarvis"** | Open / close the corner panel (its ✕ closes it too) |
 | **"Circle to search"** | Draw around anything on screen; Esc or right-click cancels |
-| **"Go to standby"** | He goes quiet until the next "Hey Jarvis" (also "stand down", "stop listening", "go to sleep", "that's all", "goodbye") |
+| **"Go to standby"** | He goes quiet until the next "Hey Morpha" (also "stand down", "stop listening", "go to sleep", "that's all", "goodbye") |
 | **Space** | Talk without the wake word |
 | **V** | Cycle the voice |
 | **D** | Diagnostics — what he heard and why |
 | **T** | Audio self-test |
 | **Escape** | Stand down |
-| Desktop **JARVIS - ON / OFF** | Arm / disarm "Hey Jarvis"; OFF also closes him |
+| Desktop **MORPHA - ON / OFF** | Arm / disarm "Hey Morpha"; OFF also closes him |
 
 ---
 
@@ -224,10 +224,10 @@ Linked devices).
 ```
  ┌ wake listener (Python) ┐   POST /wake      ┌─ bridge (Node, :8787) ───────────────┐
  │ openWakeWord, offline  │ ────────────────► │ Claude Agent SDK = Claude Code       │
- │ starts JARVIS if off   │                   │ tools: PC, WhatsApp, memory,         │
+ │ starts M.O.R.P.H.A. if off   │                   │ tools: PC, WhatsApp, memory,         │
  └────────────────────────┘                   │ reminders, weather, HUD, browser     │
                                               │ scheduler · /status · tool policy    │
- ┌─ JARVIS window (Chrome, :5188) ─────┐  ws  │                                      │
+ ┌─ M.O.R.P.H.A. window (Chrome, :5188) ─────┐  ws  │                                      │
  │ loading screen → HUD + reactor      │◄───► │                                      │
  │ speech recognition + voice          │      └──────────────────────────────────────┘
  └─────────────────────────────────────┘
@@ -237,17 +237,17 @@ Linked devices).
   from disk, starts the bridge and the interface, and the loading screen switches
   to the interface (`http://localhost:5188`) the moment both answer.
 - The **bridge** (`bridge/server.mjs`) runs Claude Code headless and gives it
-  JARVIS's tools: `bridge/pc.mjs` and `bridge/desktop.mjs` (the PC),
+  M.O.R.P.H.A.'s tools: `bridge/pc.mjs` and `bridge/desktop.mjs` (the PC),
   `bridge/whatsapp.mjs` (WhatsApp Web via Playwright), `bridge/assistant.mjs`
   (memory, reminders, weather) and `bridge/telemetry.mjs` (HUD readings).
-- The **wake listener** (`scripts/wake_listener.py`) hears "Hey Jarvis" offline.
-  With JARVIS open it signals the window through the bridge; with JARVIS off it
+- The **wake listener** (`scripts/wake_listener.py`) hears "Hey Morpha" offline.
+  With M.O.R.P.H.A. open it signals the window through the bridge; with M.O.R.P.H.A. off it
   runs `start-jarvis.bat wake`.
 - **The onscreen panel** (`scripts/popup.ps1`, WPF) and **Circle to Search**
   (`scripts/circle.ps1`, a full-screen overlay) are small native windows the
   bridge starts (`POST /popup/show`, `POST /circle`). The panel polls
   `GET /popup/state` and sends typed requests to `POST /popup/ask`; a circled
-  region is saved as a PNG in the temp folder and handed to JARVIS to look at.
+  region is saved as a PNG in the temp folder and handed to M.O.R.P.H.A. to look at.
 - **Your data stays on your PC**, in `%USERPROFILE%\.jarvis`: `memory.md`,
   `reminders.json`, the WhatsApp login, and logs (`jarvis.log`,
   `wake-listener.log`).
@@ -267,7 +267,7 @@ Frontend settings go in `.env.local`; bridge settings are environment variables.
 | `VITE_SPEECH_LANG` | Recognition accent: `en-IN`, `en-GB`, `en-US` … |
 | `VITE_END_PAUSE_MS` | Quiet that ends a command — raise it if you get cut off |
 | `VITE_MUSIC` | music is off by default; `on` turns it on (then `VITE_MUSIC_AMBIENT` / `VITE_MUSIC_WORK` = `off` drop the background music / the working cue) |
-| `VITE_WAKE_GREETING` | `spoken`: "Yes, sir?" after "Hey Jarvis" if you pause (never over you) |
+| `VITE_WAKE_GREETING` | `spoken`: "Yes, sir?" after "Hey Morpha" if you pause (never over you) |
 | `VITE_AUTOSTART` | `off` brings back the INITIALISE button |
 | `JARVIS_PERSONA` | `formal` for the original terse film-butler persona |
 | `JARVIS_MODEL` / `JARVIS_EFFORT` | Model and reasoning effort |
@@ -275,7 +275,7 @@ Frontend settings go in `.env.local`; bridge settings are environment variables.
 | `JARVIS_ALLOW_WRITES` | `1` enables actions (the `.bat` passes `--writes`) |
 
 The wake word's sensitivity is `--threshold` in `scripts/wake_listener.py`
-(default 0.15): raise it if JARVIS starts by mistake, lower it if he misses you.
+(default 0.15): raise it if M.O.R.P.H.A. starts by mistake, lower it if he misses you.
 If he misses you often, check the microphone isn't overloading: a recording
 volume of 100% distorts loud speech, and distorted speech isn't recognised —
 around 50% works well (Settings → System → Sound → Microphone → Input volume).
@@ -285,7 +285,7 @@ around 50% works well (Settings → System → Sound → Microphone → Input vo
 
 ## Safety
 
-JARVIS can act on your PC, so the bridge keeps a tool gate (`bridge/policy.mjs`):
+M.O.R.P.H.A. can act on your PC, so the bridge keeps a tool gate (`bridge/policy.mjs`):
 
 - **Read-only unless writes are on.** Without `--writes`, nothing that changes
   files, runs commands or sends messages is even offered to the model.
@@ -299,7 +299,7 @@ JARVIS can act on your PC, so the bridge keeps a tool gate (`bridge/policy.mjs`)
   refuse private network addresses.
 - `run_powershell` can do anything your user account can. That is what makes
   "do anything on my PC" possible — keep it in mind, and use the switch to turn
-  JARVIS off when you don't want him listening.
+  M.O.R.P.H.A. off when you don't want him listening.
 
 ---
 
@@ -308,11 +308,11 @@ JARVIS can act on your PC, so the bridge keeps a tool gate (`bridge/policy.mjs`)
 - **Logs:** `%USERPROFILE%\.jarvis\jarvis.log` records what he heard, what he
   said, every tool result and every voice event. Press **D** for live diagnostics.
 - **He cuts me off mid-sentence:** raise `VITE_END_PAUSE_MS` (e.g. 2000). Talking
-  over him while he speaks confuses the browser's recogniser — say "Hey Jarvis"
+  over him while he speaks confuses the browser's recogniser — say "Hey Morpha"
   to stop him first.
-- **"Hey Jarvis" does nothing:** check the switch is ON and see
+- **"Hey Morpha" does nothing:** check the switch is ON and see
   `wake-listener.log`.
-- **Port 5188 in use:** JARVIS uses its own port so other Vite projects on 5173
+- **Port 5188 in use:** M.O.R.P.H.A. uses its own port so other Vite projects on 5173
   don't clash; free 5188 or set `PORT` (keep it within 5173–5199).
 - **No sound:** press **T**. `Google UK English Male` needs internet; set
   `VITE_SYSTEM_VOICE=David` for an offline voice.

@@ -47,7 +47,11 @@ public static class JWin {
     int cloaked; DwmGetWindowAttribute(h, 14, out cloaked, 4);
     if (cloaked != 0) return false;
     var t = Title(h);
-    if (t.Length == 0 || t == "Program Manager" || t.Contains("J.A.R.V.I.S") || t == "JARVIS onscreen") return false;
+    // Its own windows, whatever the assistant is called: the main window and
+    // loading screen are titled with the dotted name ("M.O.R.P.H.A."), the
+    // popup "<name> onscreen".
+    if (t.Length == 0 || t == "Program Manager" || t.EndsWith(" onscreen") ||
+        System.Text.RegularExpressions.Regex.IsMatch(t, @"^([A-Z0-9]\.)+( ([A-Z0-9]\.)+)*$")) return false;
     RECT r; GetWindowRect(h, out r);
     return (r.R - r.L) > 200 && (r.B - r.T) > 150;
   }

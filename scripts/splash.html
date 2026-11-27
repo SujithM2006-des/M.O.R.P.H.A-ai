@@ -11,7 +11,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>J.A.R.V.I.S.</title>
+    <title>M.O.R.P.H.A.</title>
+    <link rel="icon" href="../public/brand/morpha-mark.png" type="image/png" />
     <!-- The same fonts as the interface, from disk: this page opens before any
          server is up, and must look right offline too. -->
     <link href="../public/fonts/fonts.css" rel="stylesheet" />
@@ -100,7 +101,7 @@
         gap: 14px;
         animation: fade 0.8s ease both 0.3s;
       }
-      .logo { position: relative; width: 40px; height: 40px; }
+      .logo { position: relative; width: 40px; height: 40px; border-radius: 50%; }
       .logo i {
         position: absolute;
         inset: 0;
@@ -357,9 +358,9 @@
     <div class="frame"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="scan"></i></div>
 
     <header class="head">
-      <div class="logo"><i></i><i></i></div>
+      <img class="logo" src="../public/brand/morpha-mark.png" alt="" />
       <div>
-        <strong>J.A.R.V.I.S.</strong>
+        <strong>M.O.R.P.H.A.</strong>
         <small>Personal AI Assistant</small>
       </div>
     </header>
@@ -393,7 +394,7 @@
         </svg>
         <div class="text">
           <div class="kicker">INITIALIZING</div>
-          <div class="mark">J.A.R.V.I.S.</div>
+          <div class="mark">M.O.R.P.H.A.</div>
           <div class="step" id="step">Starting core systems</div>
         </div>
       </div>
@@ -496,7 +497,7 @@
         }
         if ((Date.now() - started) / 1000 > 90) {
           // The brain runs hidden now (no console on the taskbar): its log is the place to look.
-          note.textContent = 'Taking longer than usual — see .jarvis\\jarvis.log in your user folder, or restart JARVIS'
+          note.textContent = 'Taking longer than usual — see .jarvis\\jarvis.log in your user folder, or restart M.O.R.P.H.A.'
         }
         setTimeout(tick, 600)
       }

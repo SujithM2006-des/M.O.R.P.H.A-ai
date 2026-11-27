@@ -230,7 +230,7 @@ public static class JShot {
   // loading screen is still "J.A.R.V.I.S.".
   static IntPtr Find(string title) {
     IntPtr h = string.IsNullOrEmpty(title) ? IntPtr.Zero : FindWindow(null, title);
-    return h != IntPtr.Zero ? h : FindWindow(null, "J.A.R.V.I.S.");
+    return h != IntPtr.Zero ? h : FindWindow(null, "M.O.R.P.H.A.");
   }
   public static string Show(string title) {
     IntPtr h = Find(title);

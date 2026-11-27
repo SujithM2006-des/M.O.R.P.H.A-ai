@@ -1,11 +1,11 @@
-J.A.R.V.I.S. - third-party notices
+M.O.R.P.H.A. - third-party notices
 ==================================
 
-J.A.R.V.I.S. is Copyright (C) 2026 Sujith M, and based on the open-source
+M.O.R.P.H.A. is Copyright (C) 2026 Sujith M, and based on the open-source
 JARVIS project, Copyright (C) 2026 Aditya Dewaskar, both under the MIT License
 (see LICENSE).
 
-J.A.R.V.I.S. uses the following software, each under its own licence. They
+M.O.R.P.H.A. uses the following software, each under its own licence. They
 are installed from their official sources (npm, PyPI, winget, the model
 publishers) and are not modified.
 

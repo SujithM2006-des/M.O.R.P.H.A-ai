@@ -33,6 +33,14 @@ import urllib.request
 from collections import deque
 from pathlib import Path
 
+# Started hidden (pythonw), there is no console: sys.stderr is None, and the
+# first run's model download - which prints a progress bar - crashed on it
+# before anything was logged, so the listener simply never came up.
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+
 import numpy as np
 import sounddevice as sd
 from openwakeword.model import Model
@@ -128,7 +136,8 @@ def fire_due_reminders():
             continue
         late = now - at
         note = f" (due {at.astimezone():%I:%M %p})" if late > timedelta(minutes=5) else ""
-        title = "Jarvis timer" if r.get("kind") == "timer" else "Jarvis reminder"
+        who = assistant_name().title()
+        title = f"{who} timer" if r.get("kind") == "timer" else f"{who} reminder"
         toast(title, f"{r.get('text', '')}{note}")
         fired += 1
         if r.get("kind") != "timer":
@@ -337,6 +346,91 @@ def translate_text(audio):
     except Exception as err:
         log(f"multilingual Whisper failed: {err}")
         return ""
+
+
+# The second ear for the name. Vosk's small model has never heard a made-up
+# name ("Morpha") and, with a loud microphone, loses it completely ("okay a",
+# "i do"). So a short phrase it is unsure of is heard again by Whisper base.en,
+# told to expect the name: in testing it heard "Hey Morpha" 25 times out of
+# 25, never invented the name in 35 everyday phrases, and took ~1 s. Runs in
+# the background; the loop picks up the answer.
+WAKE_WHISPER_DIRS = [HOME / "whisper" / "base.en", HOME / "whisper" / "small.en"]
+WAKE_WHISPER = {"model": None, "loading": False, "busy": False, "hit": False}
+WAKE_SAMPLES = HOME / "wake-samples"  # the last checked phrases' audio, to see why one was missed
+
+
+def load_wake_whisper():
+    def work():
+        try:
+            from faster_whisper import WhisperModel
+
+            logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+            path = next((p for p in WAKE_WHISPER_DIRS if (p / "model.bin").exists()), None)
+            if not path:
+                log("no Whisper model for checking the name - Vosk alone")
+                return
+            WAKE_WHISPER["model"] = WhisperModel(str(path), device="cpu", compute_type="int8",
+                                                 cpu_threads=min(4, os.cpu_count() or 4))
+            log(f"Whisper ({path.name}) ready to check the name")
+        except Exception as err:
+            log(f"Whisper unavailable for the name: {err}")
+        finally:
+            WAKE_WHISPER["loading"] = False
+
+    if WAKE_WHISPER["model"] is None and not WAKE_WHISPER["loading"]:
+        WAKE_WHISPER["loading"] = True
+        threading.Thread(target=work, daemon=True).start()
+
+
+def name_in_text(text, names):
+    """Whisper's words: the name near the start ("hey morpha", "morpha, open
+    chrome"), written right or close to it."""
+    import re
+
+    words = re.sub(r"[^a-z' ]", " ", text.lower()).split()
+    if any(w in names for w in words[:3]):
+        return True
+    return heard_name(" ".join(words), names, offline=False)
+
+
+def check_name_with_whisper(pcm, names, said):
+    """Hear `pcm` (the last seconds) again with Whisper, in the background."""
+    m = WAKE_WHISPER["model"]
+    if m is None or WAKE_WHISPER["busy"]:
+        return
+    WAKE_WHISPER["busy"] = True
+
+    def work():
+        try:
+            audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+            prompt = " ".join(f"{g} {n.title()}." for n in names for g in ("Hey", "Hi", "Hello"))
+            segs, _ = m.transcribe(audio, language="en", beam_size=1, initial_prompt=prompt,
+                                   condition_on_previous_text=False, without_timestamps=True)
+            text = " ".join(s.text.strip() for s in segs).strip()
+            hit = bool(text) and name_in_text(text, names)
+            log(f'Whisper heard "{text}" (Vosk: "{said}") - ' + ("the name" if hit else "not the name"))
+            try:
+                WAKE_SAMPLES.mkdir(exist_ok=True)
+                import wave
+
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                with wave.open(str(WAKE_SAMPLES / f"{stamp}-{'yes' if hit else 'no'}.wav"), "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(RATE)
+                    w.writeframes(pcm)
+                for old in sorted(WAKE_SAMPLES.glob("*.wav"))[:-20]:
+                    old.unlink()
+            except OSError:
+                pass
+            if hit:
+                WAKE_WHISPER["hit"] = True
+        except Exception as err:
+            log(f"Whisper name check failed: {err}")
+        finally:
+            WAKE_WHISPER["busy"] = False
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 # Whisper's well-known inventions on silence or noise.
@@ -693,21 +787,93 @@ GREETINGS = ("hey", "hi", "hello", "ok", "okay")
 
 
 def assistant_name():
-    """The assistant's name from setup ("Friday", "J.A.R.V.I.S" -> "jarvis"),
-    lower case, as it is said."""
+    """The assistant's name from setup ("Friday", "M.O.R.P.H.A" -> "morpha"),
+    lower case, as it is said. M.O.R.P.H.A. until one is chosen."""
     try:
         raw = json.loads((HOME / "profile.json").read_text(encoding="utf-8-sig")).get("assistant") or ""
     except (OSError, ValueError):
         raw = ""
     name = " ".join(raw.replace(".", "").lower().split())
-    return name or "jarvis"
+    return name or "morpha"
 
 
 def wake_names():
-    """The names he answers to: the one from setup, and "jarvis" always (the
-    openWakeWord model only knows "Hey Jarvis", so it stays an alias)."""
-    name = assistant_name()
-    return [name] if name == "jarvis" else [name, "jarvis"]
+    """The name it answers to ("hey <name>", "hi <name>"): the one from setup."""
+    return [assistant_name()]
+
+
+# Names the speech model has never heard of ("Morpha", most made-up names)
+# are not words to it: it writes what it heard instead - "more far", "more
+# for", "martha". So the name is also matched by how it SOUNDS: a rough
+# phonetic key (the consonants, with sound-alike spellings merged) compared
+# with a little tolerance. "hey/hi <name>" works for any name that way.
+SOUNDS = (("ph", "f"), ("gh", "g"), ("th", "t"), ("ck", "k"), ("sh", "s"), ("ch", "k"),
+          ("q", "k"), ("x", "ks"), ("z", "s"), ("v", "f"), ("c", "k"))
+
+
+def sound_key(text):
+    """ "morpha" -> "mrf", "more far" -> "mrfr", "martha" -> "mrt"."""
+    s = "".join(ch for ch in text.lower() if "a" <= ch <= "z")
+    if not s:
+        return ""
+    for a, b in SOUNDS:
+        s = s.replace(a, b)
+    key = ("a" if s[0] in "aeiouy" else s[0]) + "".join(ch for ch in s[1:] if ch not in "aeiouyhw")
+    return "".join(ch for i, ch in enumerate(key) if i == 0 or ch != key[i - 1])
+
+
+def edit_distance(a, b):
+    row = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, y in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (x != y))
+    return row[-1]
+
+
+def sounds_like(name_key, heard_key):
+    """Close enough to be the name: same start, at most one sound off (two
+    for long names), and - for short names - nothing missing."""
+    if not name_key or not heard_key:
+        return False
+    if heard_key == name_key:
+        return True
+    if len(name_key) < 3 or heard_key[:2] != name_key[:2]:
+        return False
+    if len(name_key) <= 4 and len(heard_key) < len(name_key):
+        return False
+    return edit_distance(name_key, heard_key) <= (1 if len(name_key) <= 4 else 2)
+
+
+# Greetings as the speech model writes them ("hi" often comes out as "i",
+# "hey" as "he").
+HEARD_GREETINGS = GREETINGS + ("i", "hay", "he")
+
+
+def heard_name(text, names, offline):
+    """Free recognition: a greeting, then one to three words that sound like
+    the name ("hey more far" for "hey morpha"). The name alone (the whole
+    utterance) only offline, where this listener is the only way in."""
+    words = text.split()
+    keys = [sound_key(n) for n in names]
+    for i, w in enumerate(words):
+        if w in HEARD_GREETINGS:
+            for j in range(i + 2, min(len(words), i + 4) + 1):
+                heard = sound_key("".join(words[i + 1:j]))
+                if any(sounds_like(k, heard) for k in keys):
+                    return True
+    # The greeting run into the name: "hey morpha" heard as "haim or far".
+    # Only at the start of what was said, so "ask him or for" mid-sentence
+    # cannot wake it.
+    both = [sound_key(g + n) for n in names for g in ("hey", "hi")]
+    for j in range(2, min(len(words), 4) + 1):
+        heard = sound_key("".join(words[:j]))
+        if any(len(k) >= 4 and sounds_like(k, heard) for k in both):
+            return True
+    if offline and 0 < len(words) <= 3:
+        heard = sound_key("".join(words))
+        return any(sounds_like(k, heard) for k in keys)
+    return False
 
 
 def wake_grammar(names):
@@ -772,8 +938,24 @@ def main():
         rec.SetWords(True)  # word confidences, for the name said alone
         return rec
 
+    def make_free_rec():
+        # No grammar: writes what it hears, so a name it does not know
+        # ("Morpha" -> "more far") can be matched by its sound.
+        from vosk import KaldiRecognizer
+
+        return KaldiRecognizer(vosk_model, RATE)
+
+    # "Hey Jarvis" has its own trained model (openWakeWord); any other name is
+    # heard by Vosk alone.
+    def jarvis_named():
+        return names == ["jarvis"]
+
+    free_rec = None
     if vosk_model is not None:
         vosk_rec = make_rec()
+        free_rec = make_free_rec()
+    if not jarvis_named():
+        load_wake_whisper()
     log(f"ready (threshold {args.threshold}, Vosk {'on' if vosk_rec else 'off'}, answers to: {', '.join(names)})")
     threading.Thread(target=keep_level, daemon=True).start()
 
@@ -833,6 +1015,8 @@ def main():
                     names = fresh_names
                     if vosk_model is not None:
                         vosk_rec = make_rec()
+                    if not jarvis_named():
+                        load_wake_whisper()
                     log(f"now answers to: {', '.join(names)}")
             if now - last_check > 3:
                 last_check = now
@@ -909,7 +1093,7 @@ def main():
                 stream = None
                 continue
 
-            score = float(model.predict(audio[:, 0])["hey_jarvis"])
+            score = float(model.predict(audio[:, 0])["hey_jarvis"]) if jarvis_named() else 0.0
 
             # Once a minute: proof of life, and what it is actually hearing.
             stat_peak = max(stat_peak, peak)
@@ -939,6 +1123,20 @@ def main():
                     vosk_heard = heard_wake(got, names, offline)
                     if vosk_heard:
                         log(f'Vosk caught "{got.get("text", "")}"')
+            if free_rec is not None and free_rec.AcceptWaveform(audio.tobytes()):
+                said = json.loads(free_rec.Result()).get("text", "")
+                if not vosk_heard and said and heard_name(said, names, offline):
+                    vosk_heard = True
+                    log(f'Vosk caught "{said}" (sounds like {names[0]})')
+                elif said and not jarvis_named() and (
+                    len(said.split()) <= 4 or (len(said.split()) <= 6 and said.split()[0] in HEARD_GREETINGS)
+                ):
+                    # A short phrase Vosk did not take as the name: Whisper
+                    # hears the last 3.5 s again (the phrase just ended).
+                    check_name_with_whisper(b"".join(list(recent)[-44:]), names, said)
+            if WAKE_WHISPER["hit"]:
+                WAKE_WHISPER["hit"] = False
+                vosk_heard = True
             if score < threshold and not vosk_heard:
                 continue
             if vosk_heard and score < threshold:
@@ -951,6 +1149,8 @@ def main():
             model.reset()
             if vosk_rec is not None:
                 vosk_rec.Reset()
+            if free_rec is not None:
+                free_rec.Reset()
 
             # Running: wake the window on the spot, like "Hey Google". Tried
             # whenever the bridge might be up, not only when the last check
@@ -959,7 +1159,7 @@ def main():
             # needs the internet, so hear the command here, with Vosk, and
             # hand it over as a typed request.
             if vosk_model is not None and brain_mode() == "local":
-                log(f'heard "Hey Jarvis" ({score:.2f}) - offline, listening here')
+                log(f'heard "Hey {names[0].title()}" ({score:.2f}) - offline, listening here')
                 offline_capture(stream, vosk_model, "wake phrase", recent=list(recent))
                 recent.clear()
                 model.reset()
@@ -967,7 +1167,7 @@ def main():
                 continue
             if jarvis_on or bridge()[0]:
                 if wake_window():
-                    log(f'heard "Hey Jarvis" ({score:.2f}) - woke the window')
+                    log(f'heard "Hey {names[0].title()}" ({score:.2f}) - woke the window')
                     continue
                 jarvis_on = False  # closed since the last check: start him instead
 
@@ -975,7 +1175,7 @@ def main():
             # is not started again — but a failed wake above never delays it.
             if time.monotonic() - last_start > 45:
                 last_start = time.monotonic()
-                log(f'heard "Hey Jarvis" ({score:.2f}) - JARVIS is off')
+                log(f'heard "Hey {names[0].title()}" ({score:.2f}) - JARVIS is off')
                 start_jarvis()
                 # He takes a while to come up; whatever is said in the
                 # meantime ("Hey Jarvis, what's the weather") is caught here,

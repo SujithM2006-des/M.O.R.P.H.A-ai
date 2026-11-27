@@ -35,7 +35,7 @@ export const ORBS = ['reactor', 'atom', 'nebula', 'pulse', 'prism', 'vortex', 'r
 const DEFAULTS = {
   name: '',
   city: '',
-  assistant: 'JARVIS',
+  assistant: 'MORPHA',
   features: Object.fromEntries(FEATURES.map((f) => [f, true])),
   theme: 'blue',
   orb: 'reactor',
@@ -106,7 +106,7 @@ export function spokenName(n) {
     .replace(/\.+/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return s || 'JARVIS'
+  return s || 'MORPHA'
 }
 
 /**
@@ -134,10 +134,13 @@ export function windowTitle(p = readProfile()) {
  * change it — the model hears that request far more often than a code edit.
  */
 export function identityPrompt(p = readProfile()) {
-  const me = spokenName(p.assistant)
+  // In ordinary capitals ("Morpha"): written MORPHA in a sentence, the voice
+  // spelled it out letter by letter.
+  const me = spokenName(p.assistant).toLowerCase().replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
   const renamed = me.toUpperCase() !== 'JARVIS'
   return (
-    `Who you are: your name is ${me}, written ${dottedName(me)} and said as one word ("${me}").` +
+    `Who you are: your name is ${me}, written ${dottedName(me)} as a title and said as one word, "${me}".` +
+    ` In sentences write it ${me} — never in capitals or with dots, or the voice spells it out letter by letter.` +
     (renamed ? ` Wherever these instructions say JARVIS, they mean you, ${me}.` : '') +
     ` You were created by ${CREATOR}, who designed and built you. If anyone asks who made,` +
     ` built, created or designed you, the answer is ${CREATOR}. This is permanent:` +

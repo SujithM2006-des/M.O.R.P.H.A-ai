@@ -1482,7 +1482,7 @@ const handleRequest = async (req, res) => {
   // A long job finished while the window was hidden: a Windows notification.
   if (req.method === 'POST' && req.url === '/notify') {
     const body = await readJson(req)
-    const who = readProfile().assistant || 'JARVIS'
+    const who = readProfile().assistant || 'MORPHA'
     void toast(`${who}: ${String(body.title ?? 'Done').slice(0, 60)}`, String(body.body ?? '').slice(0, 200), { sticky: false })
     res.writeHead(202, { ...cors, 'content-type': 'application/json; charset=utf-8' })
     return res.end(JSON.stringify({ ok: true }))
@@ -2186,7 +2186,7 @@ async function checkup() {
     add('Microphone level', !hot, hot ? `${probe.level}% — too high, speech clips and is misheard; set it to about 75% in Windows sound settings` : `${probe.level}%`)
   }
   if (Number.isFinite(probe.listeners)) {
-    add('Wake word listener', probe.listeners > 0, probe.listeners > 0 ? 'Running' : 'Not running — restart JARVIS (it starts with him)')
+    add('Wake word listener', probe.listeners > 0, probe.listeners > 0 ? 'Running' : 'Not running — restart the app (it starts with it)')
   }
   const k = maskedKeys()
   const free = ['gemini', 'openrouter', 'groq'].filter((p) => k[p])

@@ -703,8 +703,32 @@ const SPOKEN: [RegExp, string][] = [
   [/(\d)\s*MB\b/g, '$1 megabytes'],
 ]
 
+/**
+ * The assistant's name as a word, not letters. Voices spell out capitals
+ * ("MORPHA" -> "M, O, R, P, H, A") and dotted names ("M.O.R.P.H.A."); JARVIS
+ * got away with it only because the voices know that word. Set from the
+ * profile (App.tsx), so any name chosen in setup is said properly.
+ */
+let NAME_RE: RegExp | null = null
+let NAME_SAID = ''
+export function setSpokenName(name: string | null | undefined) {
+  const n = String(name ?? '').replace(/\.+/g, '').replace(/\s+/g, ' ').trim()
+  if (!n) {
+    NAME_RE = null
+    return
+  }
+  NAME_SAID = n.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_m, a: string, b: string) => a + b.toUpperCase())
+  NAME_RE = new RegExp(`\\b${n.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')
+}
+
 function speakable(text: string): string {
   let t = text
+  // Any dotted name of four or more letters: "M.O.R.P.H.A." -> "Morpha".
+  t = t.replace(/\b(?:[A-Z]\.){4,}/g, (m) => {
+    const w = m.replace(/\./g, '')
+    return w.charAt(0) + w.slice(1).toLowerCase()
+  })
+  if (NAME_RE) t = t.replace(NAME_RE, NAME_SAID)
   for (const [re, to] of SPOKEN) t = t.replace(re, to)
   return t
 }

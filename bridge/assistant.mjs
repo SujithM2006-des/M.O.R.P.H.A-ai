@@ -154,6 +154,8 @@ export function startScheduler({ announce, whatsapp }) {
       if (!due.length) return
       const keep = list.filter((r) => !due.includes(r))
 
+      // The name on the notifications: the assistant's, from setup ("Morpha").
+      const who = (readProfile().assistant || 'MORPHA').toLowerCase().replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
       for (const r of due) {
         const late = now - new Date(r.at).getTime()
         const lateNote = late > 5 * 60_000 ? ` (this was due at ${spokenTime(new Date(r.at))})` : ''
@@ -161,22 +163,22 @@ export function startScheduler({ announce, whatsapp }) {
         if (r.kind === 'whatsapp') {
           if (late > 2 * 60 * 60_000) {
             // Hours late: a birthday wish at three in the afternoon is worse than none.
-            const msg = `A scheduled WhatsApp message to ${r.contact} was not sent, because Jarvis was off at ${spokenTime(new Date(r.at))}.`
-            await toast('Jarvis: message not sent', msg)
+            const msg = `A scheduled WhatsApp message to ${r.contact} was not sent, because ${who} was off at ${spokenTime(new Date(r.at))}.`
+            await toast(`${who}: message not sent`, msg)
             announce(`Sir, ${msg}`)
           } else {
             const res = await whatsapp(r.contact, r.message)
             const text = res?.content?.[0]?.text ?? ''
             if (res?.isError) {
-              await toast('Jarvis: WhatsApp failed', `To ${r.contact}: ${text}`)
+              await toast(`${who}: WhatsApp failed`, `To ${r.contact}: ${text}`)
               announce(`Sir, the scheduled message to ${r.contact} could not be sent.`)
             } else {
-              await toast('Jarvis: WhatsApp sent', `To ${r.contact}: ${r.message}`)
+              await toast(`${who}: WhatsApp sent`, `To ${r.contact}: ${r.message}`)
               announce(`The scheduled message to ${r.contact} has been sent, sir.`)
             }
           }
         } else {
-          await toast('Jarvis reminder', r.text + lateNote)
+          await toast(`${who} reminder`, r.text + lateNote)
           announce(`Sir, ${r.kind === 'timer' ? 'your timer is done' : 'a reminder'}: ${r.text}.${lateNote}`)
         }
 

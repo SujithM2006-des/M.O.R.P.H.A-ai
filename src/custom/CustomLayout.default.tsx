@@ -27,6 +27,7 @@ import {
   setBrain,
   useBrains,
   useProfile,
+  useSaidName,
   useSessions,
   useUsage,
   useChat,
@@ -875,6 +876,7 @@ function OfflineCard() {
 
 function Conversation({ idle }: { idle: boolean }) {
   const { turns } = useJarvis()
+  const who = useSaidName()
   const ref = useRef<HTMLDivElement>(null)
   const recent = turns.slice(-4)
   // Correcting a request (the pencil): edit it in place and send it again.
@@ -895,7 +897,7 @@ function Conversation({ idle }: { idle: boolean }) {
       <div className="vg-convo" ref={ref}>
         {recent.length === 0 ? (
           <div className="vg-convo-empty">
-            Say “Hey Jarvis”, tap the mic, or type below.
+            Say “Hey {who}”, tap the mic, or type below.
             <small className="vg-keys">
               <kbd>Space</kbd> talk · <kbd>Esc</kbd> stop · say “undo” to reverse a file change · “health check” if something seems off
             </small>
@@ -904,8 +906,8 @@ function Conversation({ idle }: { idle: boolean }) {
           recent.map((t) => (
             <div key={t.id} className={`vg-msg vg-${t.role}`}>
               <span className="vg-who">
-                <span className="vg-badge">{t.role === 'user' ? 'U' : 'J'}</span>
-                {t.role === 'user' ? 'You' : 'Jarvis'}
+                <span className="vg-badge">{t.role === 'user' ? 'U' : who.charAt(0)}</span>
+                {t.role === 'user' ? 'You' : who}
               </span>
               {t.role === 'user' && editing === t.id ? (
                 <span className="vg-edit">
@@ -1084,7 +1086,7 @@ function ModelUsage({ i }: { i: number }) {
       i={i}
       className="vg-usage"
       extra={
-        <span className="vg-use-tabs" role="tablist" title="Tokens Jarvis used">
+        <span className="vg-use-tabs" role="tablist" title="Tokens used">
           {(['today', 'week'] as const).map((r) => (
             <button key={r} type="button" role="tab" aria-selected={range === r} className={range === r ? 'vg-on' : ''} onClick={() => setRange(r)}>
               {r === 'today' ? 'Today' : '7 days'}
@@ -1251,7 +1253,7 @@ function MicButton({ muted, listening }: { muted: boolean; listening: boolean })
       title={
         muted
           ? 'Microphone muted — tap to unmute and talk'
-          : `${listening ? 'Tap: stand by' : 'Tap: talk to JARVIS'} · Hold: mute the microphone`
+          : `${listening ? 'Tap: stand by' : 'Tap: talk'} · Hold: mute the microphone`
       }
       aria-label={muted ? 'Microphone muted. Tap to unmute and talk.' : listening ? 'Stand by (hold to mute)' : 'Talk (hold to mute)'}
       aria-pressed={muted}
@@ -1422,7 +1424,7 @@ function AskBar() {
         ref={box}
         rows={1}
         // Screen readers don't read the grey hint as the box's name.
-        aria-label="Ask Jarvis"
+        aria-label="Ask"
         value={text}
         placeholder={muted ? 'Microphone muted — type here, or tap the mic to talk' : listening ? caption || 'Listening…' : inChat ? 'Reply…  (Shift+Enter for a new line)' : 'Ask me anything…'}
         onChange={(e) => {
@@ -1649,7 +1651,7 @@ export default function CustomLayout() {
           <span className="vg-sys">
             <span
               className={`vg-sc ${s && bridgeUp ? 'vg-ok' : 'vg-bad'}`}
-              title={bridgeUp ? 'Connected to Jarvis' : "Jarvis's background service isn't answering — restart Jarvis"}
+              title={bridgeUp ? 'Connected' : "The background service isn't answering — restart the app"}
             >
               <i />
               Link
@@ -1801,7 +1803,7 @@ export default function CustomLayout() {
 
       {/* Right column */}
       <div className="vg-col vg-right">
-        <Panel title="System Status" icon={I.pulse} i={3} className="vg-status" extra={bridgeUp ? <span className="vg-live">LIVE</span> : <span className="vg-live vg-stale" title="Jarvis's background service isn't answering — these are the last readings">PAUSED</span>}>
+        <Panel title="System Status" icon={I.pulse} i={3} className="vg-status" extra={bridgeUp ? <span className="vg-live">LIVE</span> : <span className="vg-live vg-stale" title="The background service isn't answering — these are the last readings">PAUSED</span>}>
           <div className="vg-gauges">
             <Gauge label="CPU" value={s ? s.cpu : null} />
             <Gauge label="Memory" value={mem} />

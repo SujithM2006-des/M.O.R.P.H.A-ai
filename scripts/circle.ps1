@@ -34,7 +34,7 @@ public class CircleForm : Form {
     // Out of the way first, so the main JARVIS window isn't what gets circled.
     // Titled with the assistant's name (setup can rename him).
     IntPtr jarvis = FindWindow(null, title);
-    if (jarvis == IntPtr.Zero) jarvis = FindWindow(null, "J.A.R.V.I.S.");
+    if (jarvis == IntPtr.Zero) jarvis = FindWindow(null, "M.O.R.P.H.A.");  // the loading screen
     if (jarvis != IntPtr.Zero) { ShowWindow(jarvis, 6); System.Threading.Thread.Sleep(350); }
     var f = new CircleForm();
     Application.Run(f);
@@ -106,9 +106,9 @@ public class CircleForm : Form {
 }
 '@
 # The main window's title: the assistant's name from setup (~/.jarvis/profile.json).
-$title = 'J.A.R.V.I.S.'
-try {
-  $a = ([IO.File]::ReadAllText((Join-Path $env:USERPROFILE '.jarvis\profile.json')) | ConvertFrom-Json).assistant
-  if ($a -and "$a".Trim().ToUpper() -ne 'JARVIS') { $title = "$a".Trim().ToUpper() }
-} catch {}
+# Written with a dot after every letter: the rule of dottedName() in bridge/profile.mjs.
+$a = $null
+try { $a = ([IO.File]::ReadAllText((Join-Path $env:USERPROFILE '.jarvis\profile.json')) | ConvertFrom-Json).assistant } catch {}
+$a = ("$a" -replace '\.+', '' -replace '\s+', ' ').Trim(); if (-not $a) { $a = 'MORPHA' }
+$title = ($a.ToUpper() -split ' ' | ForEach-Object { (($_.ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) }) -join '.') + '.' }) -join ' '
 [Console]::Out.Write([CircleForm]::Run($title))

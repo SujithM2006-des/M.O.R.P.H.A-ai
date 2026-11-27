@@ -55,8 +55,11 @@ function Points-Here([string]$lnk) {
   $s = $shell.CreateShortcut($lnk)
   return ("$($s.TargetPath) $($s.Arguments) $($s.WorkingDirectory)" -like $here)
 }
-$startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'JARVIS wake listener.lnk'
-if ((Test-Path $startup) -and (Points-Here $startup)) { Remove-Item $startup -Force }
+# (Named after J.A.R.V.I.S. before the rename to M.O.R.P.H.A.: both.)
+foreach ($n in 'MORPHA wake listener.lnk', 'JARVIS wake listener.lnk') {
+  $startup = Join-Path ([Environment]::GetFolderPath('Startup')) $n
+  if ((Test-Path $startup) -and (Points-Here $startup)) { Remove-Item $startup -Force }
+}
 # .jarvis: J.A.R.V.I.S.'s downloads go (voice models, its Python, its Chrome
 # logins, logs); memory and personal files stay, so a reinstall remembers the
 # user. (The same list as installer\remove-jarvis.ps1.)
@@ -67,8 +70,9 @@ $keep = @(
 )
 Get-ChildItem -LiteralPath $data -Force | Where-Object { $keep -notcontains $_.Name } | Remove-Item -Recurse -Force
 
-# Both desktop switches: "JARVIS Kill Switch" and "Popup Kill Switch".
-foreach ($name in 'JARVIS Kill Switch', 'Popup Kill Switch') {
+# Both desktop switches: "MORPHA Kill Switch" (before the rename "JARVIS
+# Kill Switch") and "Popup Kill Switch".
+foreach ($name in 'MORPHA Kill Switch', 'JARVIS Kill Switch', 'Popup Kill Switch') {
   $switchDir = Join-Path ([Environment]::GetFolderPath('Desktop')) $name
   if (Test-Path $switchDir) {
     Get-ChildItem $switchDir -Filter '*.lnk' | Where-Object { Points-Here $_.FullName } | Remove-Item -Force
