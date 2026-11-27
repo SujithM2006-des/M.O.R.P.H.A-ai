@@ -332,14 +332,37 @@ async function openFlowProject(ctx) {
 async function configureFlow(page, state, aspect) {
   const want = aspect === '16:9' ? '16:9' : '9:16'
   if (state.configured === want) return
-  await page.locator('button:has-text("tune")').first().click({ timeout: 15_000 })
+  // The settings button: "Agent settings" (Nov 27 2026 redesign; its icon is
+  // no longer "tune", which is why "setting up the project" failed).
+  await page.locator('button[aria-label="Agent settings"]').or(page.locator('button:has-text("tune")')).first().click({ timeout: 15_000 })
   await page.getByText('Agent settings', { exact: true }).first().waitFor({ timeout: 10_000 })
-  await page.locator('label:has-text("Never")').first().click({ timeout: 5000 })
-  // The image section comes first; the video section's controls are the last ones.
-  await page.locator(`button[role="radio"]:has-text("${want}")`).last().click({ timeout: 5000 })
-  await page.locator('button[role="radio"]').filter({ hasText: /^\s*x1\s*$/ }).last().click({ timeout: 3000 }).catch(() => {})
-  await page.getByRole('button', { name: 'Save' }).click({ timeout: 5000 })
+  // Never ask before spending credits: a radio now, a label before.
+  // (Its raw text runs icon names into the word — "…uncheckedNeverinfo" — so
+  // no word boundaries.) The options draw a moment after the title: wait for
+  // whichever layout it is.
+  const never = page.locator('[role="radio"]').filter({ hasText: /Never/ }).or(page.locator('label:has-text("Never")'))
+  await never.first().waitFor({ state: 'visible', timeout: 10_000 })
+  await never.first().click({ timeout: 5000 })
+  // Aspect ratio and number of clips moved to their own "Video defaults" page.
+  const videoDefaults = page.locator('button:has-text("Video defaults")')
+  if (await videoDefaults.count()) {
+    await videoDefaults.first().click({ timeout: 10_000 })
+    await page.getByText('Aspect ratio', { exact: true }).first().waitFor({ timeout: 10_000 })
+  }
+  // (In the old single page the image section came first: the video controls are the last ones.)
+  await page.locator(`[role="radio"]:has-text("${want}")`).last().click({ timeout: 5000 })
+  await page.locator('[role="radio"]').filter({ hasText: /^\s*x1\s*$/ }).last().click({ timeout: 3000 }).catch(() => {})
+  // The old panel had a Save button; the new one saves as you choose.
+  const save = page.getByRole('button', { name: 'Save', exact: true })
+  if (await save.count()) await save.first().click({ timeout: 5000 })
   await page.waitForTimeout(1200)
+  // Back out of the settings pages to the prompt box.
+  for (let i = 0; i < 3; i++) {
+    const back = page.locator('button[aria-label="Back"]')
+    if (!(await back.count()) || !(await back.first().isVisible().catch(() => false))) break
+    await back.first().click({ timeout: 3000 }).catch(() => {})
+    await page.waitForTimeout(600)
+  }
   state.configured = want
   saveFlow(state)
 }
@@ -443,6 +466,8 @@ async function makeFlowVideo(prompt, aspect, out, characters = []) {
     throw new Error('Flow took longer than 12 minutes to make the video.')
   } catch (err) {
     if (err instanceof VideoLimitError || !/Timeout|locator|waiting for/i.test(String(err?.message))) throw err
+    // The underlying cause, for the log: which control was not found.
+    console.log(`[jarvis] Flow step "${step}" failed: ${String(err?.message).split('\n').slice(0, 3).join(' / ')}`)
     throw new Error(`Flow: couldn't do "${step}" (the page didn't respond as expected — Flow may have changed).`)
   } finally {
     await page?.close().catch(() => {})
