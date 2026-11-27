@@ -11,10 +11,11 @@
  * windows' connections so each reconnects onto a session with the new brain.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { installedModels } from './ollama.mjs'
+import { protect, unprotect } from './secrets.mjs'
 
 export const OLLAMA_URL = process.env.JARVIS_OLLAMA_URL ?? 'http://127.0.0.1:11434'
 
@@ -142,11 +143,51 @@ export const ORDER = ['claude', 'openrouter', 'gemini', 'groq', 'local']
 const KEYS_FILE = join(homedir(), '.jarvis', 'keys.json')
 const CHOICE_FILE = join(homedir(), '.jarvis', 'brain-choice')
 
-/** API keys, from ~/.jarvis/keys.json — this PC only, never in the repository. */
-export function readKeys() {
+/**
+ * API keys, from ~/.jarvis/keys.json — this PC only, never in the repository.
+ *
+ * Kept encrypted for this Windows account (bridge/secrets.mjs, DPAPI): the file
+ * holds {"protected":"dpapi","data":"…"}, so a copy of it is useless anywhere
+ * else. Decrypted once and kept in memory (decrypting takes ~2.5 s), read again
+ * only when the file changes. A plain file from before is encrypted the first
+ * time it is read — only after a test decrypt gives back exactly the same keys.
+ */
+let keysCache = null // { mtime, keys }
+
+function writeKeysFile(k) {
+  const text = JSON.stringify(k)
+  let body = JSON.stringify(k, null, 2)
   try {
-    return JSON.parse(readFileSync(KEYS_FILE, 'utf8').replace(/^﻿/, ''))
+    const data = protect(text)
+    if (data && unprotect(data) === text) body = JSON.stringify({ protected: 'dpapi', data }, null, 2)
+  } catch (err) {
+    console.log(`[jarvis] keys stored without encryption (${err.message})`)
+  }
+  mkdirSync(join(homedir(), '.jarvis'), { recursive: true })
+  writeFileSync(KEYS_FILE, body)
+  keysCache = { mtime: statSync(KEYS_FILE).mtimeMs, keys: k }
+}
+
+export function readKeys() {
+  let mtime
+  try {
+    mtime = statSync(KEYS_FILE).mtimeMs
   } catch {
+    return {}
+  }
+  if (keysCache && keysCache.mtime === mtime) return structuredClone(keysCache.keys)
+  try {
+    const stored = JSON.parse(readFileSync(KEYS_FILE, 'utf8').replace(/^﻿/, ''))
+    if (stored && stored.protected === 'dpapi' && typeof stored.data === 'string') {
+      const keys = JSON.parse(unprotect(stored.data))
+      keysCache = { mtime, keys }
+      return structuredClone(keys)
+    }
+    // Plain, from before encryption: encrypt it now.
+    writeKeysFile(stored ?? {})
+    return structuredClone(stored ?? {})
+  } catch (err) {
+    console.log(`[jarvis] the AI keys could not be read (${err.message}) - set them again in Customize`)
     return {}
   }
 }
@@ -177,10 +218,7 @@ export function saveKeys(input) {
       changed = true
     }
   }
-  if (changed) {
-    mkdirSync(join(homedir(), '.jarvis'), { recursive: true })
-    writeFileSync(KEYS_FILE, JSON.stringify(k, null, 2))
-  }
+  if (changed) writeKeysFile(k)
   return changed
 }
 

@@ -106,7 +106,9 @@ export function journalPrompt() {
     '\n\nYOUR RECENT CONVERSATIONS WITH THE USER — from this and earlier sessions, oldest ' +
     'first, kept across restarts. This is your own memory of what was said and done: use it ' +
     'naturally ("the PDF I saved this morning"), never recite it, and never say you are ' +
-    'reading a log. For anything older or not here, call `search_history`.\n' +
+    'reading a log. For anything older or not here, call `search_history`. A name or nickname the ' +
+    'user asked for in an EARLIER session (for themselves or for you) applied to that session only: ' +
+    'use the names from setup now unless they ask again in this conversation.\n' +
     picked.join('\n') +
     '\n'
   )

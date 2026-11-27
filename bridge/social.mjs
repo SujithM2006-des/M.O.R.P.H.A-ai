@@ -27,6 +27,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findTool } from './creator.mjs'
+import { protect, unprotect } from './secrets.mjs'
 
 const HOME = homedir()
 const VENV = join(HOME, '.jarvis', 'wake-venv', 'Scripts')
@@ -34,12 +35,53 @@ const YTDLP = join(VENV, 'yt-dlp.exe')
 const PY = join(VENV, 'python.exe')
 const SCRIPTS = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'scripts')
 const PROFILE = join(HOME, '.jarvis', 'social-profile')
-const COOKIES = join(HOME, '.jarvis', 'social-cookies.txt')
+// The logins as a cookies file for yt-dlp - kept ENCRYPTED for this Windows
+// account (bridge/secrets.mjs). The plain form exists only inside a job's
+// temporary folder while yt-dlp runs, and goes with that folder.
+const COOKIES = join(HOME, '.jarvis', 'social-cookies.dpapi')
+const OLD_COOKIES = join(HOME, '.jarvis', 'social-cookies.txt') // plain, from before
 
 const textPart = (t) => ({ type: 'text', text: t })
 const failText = (t) => ({ isError: true, content: [textPart(t)] })
 const stamp = () => new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 16)
-const cookieArgs = () => (existsSync(COOKIES) ? ['--cookies', COOKIES] : [])
+
+let cookieCache = null
+/** The cookies file's text ("" if none), decrypted once and kept in memory. */
+function cookieText() {
+  if (cookieCache !== null) return cookieCache
+  try {
+    if (existsSync(COOKIES)) {
+      cookieCache = unprotect(readFileSync(COOKIES, 'utf8').trim())
+    } else if (existsSync(OLD_COOKIES)) {
+      // Plain, from before: encrypted now, and the plain file removed.
+      cookieCache = readFileSync(OLD_COOKIES, 'utf8')
+      storeCookies(cookieCache)
+    } else cookieCache = ''
+  } catch {
+    cookieCache = ''
+  }
+  return cookieCache
+}
+function storeCookies(text) {
+  cookieCache = text
+  const enc = protect(text)
+  if (enc && unprotect(enc) === text) {
+    writeFileSync(COOKIES, enc)
+    rmSync(OLD_COOKIES, { force: true })
+  } else writeFileSync(OLD_COOKIES, text) // no encryption available (not Windows)
+}
+// A plain cookies file from before: encrypted as soon as the brain starts,
+// not left readable until a link happens to be reviewed.
+if (existsSync(OLD_COOKIES)) setTimeout(() => cookieText(), 5000)
+
+/** yt-dlp's --cookies, written into the job's own temporary folder (deleted with it). */
+function cookieArgs(work) {
+  const text = cookieText()
+  if (!text) return []
+  const file = join(work, 'cookies.txt')
+  writeFileSync(file, text)
+  return ['--cookies', file]
+}
 
 function run(file, args, timeoutMs = 90_000) {
   return new Promise((res, rej) => {
@@ -101,14 +143,14 @@ async function saveCookies(ctx) {
     const sub = c.domain.startsWith('.') ? 'TRUE' : 'FALSE'
     lines.push([c.domain, sub, c.path || '/', c.secure ? 'TRUE' : 'FALSE', Math.max(0, Math.round(c.expires || 0)), c.name, c.value].join('\t'))
   }
-  writeFileSync(COOKIES, lines.join('\n') + '\n')
+  storeCookies(lines.join('\n') + '\n')
   return all
 }
 
 /** Logged in to a site already? (its session cookie is in the saved cookies) */
 function loggedIn(site) {
   try {
-    return readFileSync(COOKIES, 'utf8')
+    return cookieText()
       .split('\n')
       .some((l) => {
         const f = l.split('\t')
@@ -174,7 +216,7 @@ async function downloadSmall(url, work) {
       '-o', join(work, 'media.%(ext)s'),
       '--no-playlist', '--no-warnings', '--max-filesize', '400M',
       ...(ff ? ['--ffmpeg-location', dirname(ff)] : []),
-      ...cookieArgs(),
+      ...cookieArgs(work),
       url,
     ],
     6 * 60_000,
@@ -250,7 +292,7 @@ async function reviewLink({ url, frames: nFrames = 4, transcript = true }) {
     let info = null
     let why = ''
     try {
-      info = JSON.parse(await run(YTDLP, ['-J', '--skip-download', '--no-warnings', '--no-playlist', ...cookieArgs(), url], 90_000))
+      info = JSON.parse(await run(YTDLP, ['-J', '--skip-download', '--no-warnings', '--no-playlist', ...cookieArgs(work), url], 90_000))
     } catch (err) {
       why = err.message
     }

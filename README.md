@@ -251,6 +251,14 @@ Linked devices).
 - **Your data stays on your PC**, in `%USERPROFILE%\.jarvis`: `memory.md`,
   `reminders.json`, the WhatsApp login, and logs (`jarvis.log`,
   `wake-listener.log`).
+- **Protected at rest:** the AI keys (`keys.json`) and the social-site logins
+  (`social-cookies.dpapi`) are encrypted for your Windows account (DPAPI), so a
+  copy of the folder is useless on another PC or account. `litellm.yaml` holds
+  no keys. (Moving to a new PC: enter the keys again in Customize.)
+- **Kept briefly:** the logs keep about a week of what was said, then go.
+  Voice recordings are **off**; to keep them for troubleshooting a misheard
+  word, create an empty file `%USERPROFILE%\.jarvis\keep-recordings` — they are
+  then kept 3 days. Delete that file to stop again.
 
 ---
 

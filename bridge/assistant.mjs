@@ -291,6 +291,14 @@ export function upcoming(n = 4) {
 }
 
 /**
+ * A fact that would rename the user or the assistant ("call me Boss", "my name
+ * is …", "your name is Friday now"). Not about other people: "Mum's name is
+ * saved as Mum ❤️" is still remembered.
+ */
+const NAME_FACT =
+  /\b(my (first |real )?(name|nickname)|call me|address me|refer to me|(the )?user'?s (first |real )?(name|nickname)|(the )?(user|person|owner)\b[^.]{0,40}\b(name|called|named|goes by)|(your|the assistant'?s|morpha'?s|jarvis'?s) (name|nickname)|call (you|yourself)|you are (now )?(called|named)|rename (you|yourself|the assistant))\b/i
+
+/**
  * The user's first name, from memory: "my name is …" / "the user's name is …",
  * else the name their own WhatsApp chat is saved under, else JARVIS_USER_NAME.
  * Null when nothing says — the interface then says "sir".
@@ -509,6 +517,16 @@ export function assistantServer({ allowWrites }) {
         async ({ fact }) => {
           const line = fact.replace(/\s+/g, ' ').trim()
           if (!line) return fail('Nothing to remember.')
+          // A name for the user or for the assistant, asked for in chat, lasts
+          // for that conversation only: never saved, so it cannot change the
+          // account or follow into other sessions. Names are set in Customize.
+          if (NAME_FACT.test(line)) {
+            return fail(
+              'Not saved: names (the user\'s, or yours) change only in Customize (setup). A name asked for in ' +
+                'chat is for this conversation only - just use it until the conversation ends, and tell the ' +
+                'user it will not carry over.',
+            )
+          }
           const lines = memoryLines()
           if (lines.some((l) => l.slice(2).toLowerCase() === line.toLowerCase())) return ok('Already remembered.')
           const header = existsSync(MEMORY) ? '' : '# What Jarvis knows about you\n\nOne fact per line. Edit freely.\n\n'

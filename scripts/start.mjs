@@ -12,7 +12,7 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import process from 'node:process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -98,10 +98,25 @@ try {
 const LOG_FILE = join(homedir(), '.jarvis', 'jarvis.log')
 try {
   mkdirSync(dirname(LOG_FILE), { recursive: true })
-  // Rotate past 5 MB, keeping one previous file: the log records every voice
-  // command, and left alone it grew without limit.
-  if (existsSync(LOG_FILE) && statSync(LOG_FILE).size > 5 * 1024 * 1024) {
-    renameSync(LOG_FILE, LOG_FILE.replace(/\.log$/, '.old.log'))
+  // The log records every voice command, so it is not kept long: rotated past
+  // 5 MB or once it is a week old, and the previous one deleted once it is a
+  // week old too - at most about two weeks of what was said, never months.
+  // When the current log was begun is kept in a side file: Windows can hand a
+  // re-created file its predecessor's creation time ("file tunnelling").
+  const OLD_LOG = LOG_FILE.replace(/\.log$/, '.old.log')
+  const SINCE = `${LOG_FILE}.since`
+  const WEEK = 7 * 24 * 60 * 60 * 1000
+  if (existsSync(OLD_LOG) && Date.now() - statSync(OLD_LOG).mtimeMs > WEEK) unlinkSync(OLD_LOG)
+  let since = 0
+  try {
+    since = Number(readFileSync(SINCE, 'utf8')) || 0
+  } catch {
+    /* none yet */
+  }
+  if (!since) writeFileSync(SINCE, String((since = Date.now())))
+  if (existsSync(LOG_FILE) && (statSync(LOG_FILE).size > 5 * 1024 * 1024 || Date.now() - since > WEEK)) {
+    renameSync(LOG_FILE, OLD_LOG)
+    writeFileSync(SINCE, String(Date.now()))
   }
   appendFileSync(LOG_FILE, `\n===== ${new Date().toLocaleString()} start ${process.argv.slice(2).join(' ')} =====\n`)
 } catch {

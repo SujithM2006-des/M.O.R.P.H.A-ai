@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'app'), $Out | Out-N
 # --- the app: tracked files only ---------------------------------------------
 $files = @(git -C $repo ls-files) + @(git -C $repo ls-files --others --exclude-standard -- installer) | Sort-Object -Unique
 # Not for users: the developer's tool settings, the test suite, the bug log.
-$skip = '^(\.claude/|test/|\.oxlintrc\.json$|BUG-REPORT\.md$|installer/build\.ps1$|scripts/try-ollama\.mjs$)'
+$skip = '^(\.claude/|\.github/|test/|\.oxlintrc\.json$|BUG-REPORT\.md$|installer/build\.ps1$|scripts/try-ollama\.mjs$)'
 $count = 0
 foreach ($f in $files) {
   if ($f -match $skip) { continue }
@@ -139,7 +139,12 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed on the setup (exit $LASTEXIT
 & $iscc /Q "/DAppVersion=$Version" "/DStage=$stage" "/DOutDir=$Out" (Join-Path $PSScriptRoot 'uninstaller.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed on the uninstaller (exit $LASTEXITCODE)" }
 Remove-Item $stage -Recurse -Force
-foreach ($name in "MORPHA-Setup-$Version.exe", 'MORPHA-Uninstall.exe') {
+# Each file's SHA-256 beside it (SHA256SUMS.txt), to publish with them: anyone
+# can check a copy they were sent is exactly the one that was built.
+$sums = foreach ($name in "MORPHA-Setup-$Version.exe", 'MORPHA-Uninstall.exe') {
   $exe = Get-Item (Join-Path $Out $name)
-  Write-Host ("built {0} ({1:N1} MB)" -f $exe.FullName, ($exe.Length / 1MB))
+  $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+  Write-Host ("built {0} ({1:N1} MB)  SHA-256 {2}" -f $exe.FullName, ($exe.Length / 1MB), $sha)
+  "$sha  $name"
 }
+Set-Content -Path (Join-Path $Out 'SHA256SUMS.txt') -Value $sums -Encoding ascii

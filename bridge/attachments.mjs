@@ -138,7 +138,8 @@ export async function prepareAttachments(paths) {
     const name = basename(src)
     try {
       if (!isAbsolute(src)) throw new Error('not a full path')
-      const bad = protectedProblem(src)
+      // Chosen by the user themselves: any folder, but never a private or credential one.
+      const bad = protectedProblem(src, { userChosen: true })
       if (bad) throw new Error(bad)
       const info = await stat(src)
       if (!info.isFile()) throw new Error('it is a folder, not a file')

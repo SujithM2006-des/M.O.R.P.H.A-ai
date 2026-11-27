@@ -56,13 +56,55 @@ KILL_SWITCH = HOME / "disabled"
 # as the kill switch for listening, but JARVIS himself stays running.
 MUTED = HOME / "muted"
 
+LOG_FILE = HOME / "wake-listener.log"
+LOG_DAYS = 7  # what was heard is kept a week, no longer
+
+
+def prune_log():
+    """Drop log lines older than LOG_DAYS (the log records what was heard)."""
+    import datetime
+
+    try:
+        cutoff = (datetime.datetime.now() - datetime.timedelta(days=LOG_DAYS)).strftime("%Y-%m-%d")
+        lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        keep = [ln for ln in lines if not (ln[:4].isdigit() and ln[:10] < cutoff)]
+        if len(keep) != len(lines):
+            LOG_FILE.write_text("".join(keep), encoding="utf-8")
+    except OSError:
+        pass
+
+
+prune_log()
 logging.basicConfig(
-    filename=HOME / "wake-listener.log",
+    filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    encoding="utf-8",
 )
 log = logging.info
+
+# Recordings of what was said (offline commands, wake phrases) are only for
+# troubleshooting a misheard word, so they are OFF: kept only while
+# ~/.jarvis/keep-recordings exists, and then for 3 days at most.
+KEEP_RECORDINGS = HOME / "keep-recordings"
+RECORDING_DAYS = 3
+
+
+def recordings_on():
+    return KEEP_RECORDINGS.exists()
+
+
+def prune_recordings():
+    """Recordings off: none kept. On: none older than RECORDING_DAYS."""
+    cutoff = time.time() - RECORDING_DAYS * 86400
+    for folder in (HOME / "voice-samples", HOME / "wake-samples"):
+        for f in folder.glob("*.wav") if folder.exists() else []:
+            try:
+                if not recordings_on() or f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
 
 RATE = 16_000
 CHUNK = 1280  # 80 ms, the frame size openWakeWord expects
@@ -410,6 +452,8 @@ def check_name_with_whisper(pcm, names, said):
             hit = bool(text) and name_in_text(text, names)
             log(f'Whisper heard "{text}" (Vosk: "{said}") - ' + ("the name" if hit else "not the name"))
             try:
+                if not recordings_on():
+                    raise OSError("recordings off")
                 WAKE_SAMPLES.mkdir(exist_ok=True)
                 import wave
 
@@ -477,7 +521,10 @@ def whisper_text(pcm):
 
 
 def keep_sample(pcm, said):
-    """The last 20 offline commands' audio (with what was heard, in the name)."""
+    """The last 20 offline commands' audio (with what was heard, in the name) -
+    only while recordings are on (~/.jarvis/keep-recordings)."""
+    if not recordings_on():
+        return
     try:
         import re
         import wave
@@ -907,6 +954,7 @@ def main():
     args = ap.parse_args()
 
     single_instance()
+    prune_recordings()
     download_models(["hey_jarvis"])  # no-op once cached
     # The voice-activity filter zeroes the score unless there is human speech,
     # which is what keeps a low threshold from firing on taps, music or fans.
@@ -964,6 +1012,7 @@ def main():
     last_start = -1e9  # last cold start of JARVIS
     last_check = 0.0
     last_reminders = 0.0
+    last_prune = time.monotonic()
     jarvis_on = False
     last_data = last_sound = time.monotonic()
     stat_at, stat_peak, stat_score = time.monotonic(), 0, 0.0
@@ -1018,6 +1067,11 @@ def main():
                     if not jarvis_named():
                         load_wake_whisper()
                     log(f"now answers to: {', '.join(names)}")
+            # It runs for days: the week-old log and old recordings go every 6 h.
+            if now - last_prune > 6 * 3600:
+                last_prune = now
+                prune_log()
+                prune_recordings()
             if now - last_check > 3:
                 last_check = now
                 up, clients = bridge()

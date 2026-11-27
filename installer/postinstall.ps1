@@ -51,10 +51,43 @@ function Winget-Install([string]$id, [string]$name, [string[]]$more = @()) {
 Add-Type -AssemblyName System.Net.Http
 $http = New-Object System.Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromHours(4)
+# Every model the setup downloads is checked against the SHA-256 it is known
+# to have: a file that was tampered with (or cut short) is deleted, not
+# installed. The Whisper links name a fixed version (not "main"), so the
+# files - and these sums - cannot change under the setup.
+$WhisperRev = @{
+  'base.en'  = '3d3d5dee26484f91867d81cb899cfcf72b96be6c'
+  'small.en' = 'd1d751a5f8271d482d14ca55d9e2deeebbae577f'
+}
+$Sha256 = @{
+  'vosk-model-small-en-in-0.4.zip' = '20663dcac4d5cb783a579c54d98339344a688e4ec6e1b4a4b059fd1235454cc7'
+  'vosk-model-en-in-0.5.zip'       = '0365c52f79308d81c2de832cf934ce42da6bf7e04dd3acd4203cacf50ab70f5c'
+  'base.en/config.json'            = 'f3bc3821e9fc76a27bae538e11ae5b677dcdd352b4600429ce7951d398569aeb'
+  'base.en/tokenizer.json'         = '929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df'
+  'base.en/vocabulary.txt'         = 'ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf'
+  'base.en/model.bin'              = '2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef'
+  'small.en/config.json'           = '666a9605530ac1f61fa8177f3702b4dacec9966749e42610839fcc32661d5fae'
+  'small.en/tokenizer.json'        = '929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df'
+  'small.en/vocabulary.txt'        = 'ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf'
+  'small.en/model.bin'             = '62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a'
+}
+function Get-WhisperUrl([string]$model, [string]$file) {
+  "https://huggingface.co/Systran/faster-whisper-$model/resolve/$($WhisperRev[$model])/$file"
+}
+# Throws (and deletes the file) if it is not the file it should be.
+function Assert-Sha([string]$path, [string]$key) {
+  $want = $Sha256[$key]
+  if (-not $want) { return }
+  $got = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower()
+  if ($got -ne $want) {
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    throw "the downloaded file failed its safety check (checksum mismatch) and was deleted"
+  }
+}
 # A download that says how far it is ("230 of 460 MB (50%)"), one line per
 # percent: the setup window shows the latest line, so a long download
 # visibly moves instead of looking stuck. Throws on failure.
-function Get-File([string]$url, [string]$out, [string]$name) {
+function Get-File([string]$url, [string]$out, [string]$name, [string]$check = '') {
   $r = $http.GetAsync($url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).Result
   [void]$r.EnsureSuccessStatusCode()
   $total = $r.Content.Headers.ContentLength
@@ -66,19 +99,22 @@ function Get-File([string]$url, [string]$out, [string]$name) {
     while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
       $fs.Write($buf, 0, $n); $done += $n
       $mb = [math]::Floor($done / 1MB)
-      if ($total) {
+      if ($total -and $total -lt 5MB) {
+        # A small file: done in a moment, no progress lines needed.
+      } elseif ($total) {
         $pc = [math]::Floor(100 * $done / $total)
         if ($pc -ne $shown) { $shown = $pc; Write-Host "        Downloading ${name}: $mb of $([math]::Round($total / 1MB)) MB ($pc%)" }
       } elseif ([math]::Floor($mb / 10) -ne $shown) { $shown = [math]::Floor($mb / 10); Write-Host "        Downloading ${name}: $mb MB" }
     }
   } finally { $fs.Close(); $in.Close() }
+  if ($check) { Write-Host "        Checking ${name}..."; Assert-Sha $out $check }
 }
 function Get-Zip([string]$url, [string]$into, [string]$name) {
   $zip = Join-Path $env:TEMP ('jarvis-' + [IO.Path]::GetFileName($url))
   Info "downloading $name..."
   try {
     New-Item -ItemType Directory -Force -Path $into | Out-Null
-    Get-File $url $zip $name
+    Get-File $url $zip $name ([IO.Path]::GetFileName($url))
     Write-Host "        Unpacking $name..."
     Expand-Archive -Path $zip -DestinationPath $into -Force
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
@@ -147,9 +183,9 @@ if (Want 'Packages') {
 # Python: voice, documents, charts, the free AI accounts (LiteLLM).
 if (Want 'Python') {
   Step 'Python (voice, documents, free AI accounts)'
-  # Python 3.11 is what M.O.R.P.H.A. is built and tested on; 3.12 and 3.10 also
-  # work for its packages, so one of those already on the PC is used if 3.11
-  # cannot be installed.
+  # Python 3.11 is what M.O.R.P.H.A. is built and tested on; 3.12 also works for
+  # its packages (the lock files carry its checksums too), so it is used if
+  # 3.11 cannot be installed. (3.10 is too old for some of today's packages.)
   function Find-Python([string[]]$versions) {
     foreach ($v in $versions) {
       $d = $v.Replace('.', '')
@@ -165,19 +201,19 @@ if (Want 'Python') {
   }
   if (-not (Test-Path $vpy)) {
     $py = Find-Python @('3.11')
-    if (-not $py) { Winget-Install 'Python.Python.3.11' 'Python 3.11' @('--scope', 'user'); $py = Find-Python @('3.11', '3.12', '3.10') }
+    if (-not $py) { Winget-Install 'Python.Python.3.11' 'Python 3.11' @('--scope', 'user'); $py = Find-Python @('3.11', '3.12') }
     if ($py) { Info "creating M.O.R.P.H.A.'s Python environment ($py)..."; & $py -m venv $venv | Out-Host }
   }
   if (Test-Path $vpy) {
-    $pkgs = @('numpy', 'edge-tts', 'litellm[proxy]', 'python-docx', 'python-pptx', 'openpyxl', 'matplotlib', 'pandas',
-              'qrcode', 'pillow', 'soundfile', 'yt-dlp', 'youtube-transcript-api')
-    if ($Listener -or $Offline) { $pkgs += @('openwakeword', 'sounddevice', 'vosk') }
-    if ($Offline) { $pkgs += 'faster-whisper' }
-    Info ('installing: ' + ($pkgs -join ', '))
-    & $vpy -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+    # Exact versions, each file checked against its known SHA-256 (pip
+    # --require-hashes): installer\python-*.txt, made by the lock step. A
+    # package that was tampered with is refused, not installed.
+    $lock = if ($Offline) { 'python-offline.txt' } elseif ($Listener) { 'python-listener.txt' } else { 'python-base.txt' }
+    $lockFile = Join-Path $App "installer\$lock"
+    Info "installing the checked Python packages ($lock)..."
     # Not --quiet: each "Collecting ..." / "Installing ..." line shows in the
     # setup window, so this long step visibly moves.
-    & $vpy -m pip install --progress-bar off @pkgs 2>&1 | Out-Host
+    & $vpy -m pip install --disable-pip-version-check --progress-bar off --require-hashes -r $lockFile 2>&1 | Out-Host
     if ($LASTEXITCODE -eq 0) { Ok 'Python packages installed' }
     else { Problem 'Some Python packages did not install (see the Setup log). Run the setup file again to retry.' }
   } else { Problem 'Python 3.11 is not installed. Get it from https://www.python.org (version 3.11), then run the setup file again.' }
@@ -198,7 +234,7 @@ if ((Want 'WakeModel') -and ($Listener -or $Offline)) {
     try {
       foreach ($f in 'config.json', 'tokenizer.json', 'vocabulary.txt', 'model.bin') {
         $label = if ($f -eq 'model.bin') { 'the name checker (Whisper base.en)' } else { "Whisper base.en $f" }
-        Get-File "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/$f" (Join-Path $wb "$f.part") $label
+        Get-File (Get-WhisperUrl 'base.en' $f) (Join-Path $wb "$f.part") $label "base.en/$f"
         Move-Item -Force (Join-Path $wb "$f.part") (Join-Path $wb $f)
       }
       Ok 'name checker (Whisper base.en) downloaded'
@@ -222,7 +258,7 @@ if ((Want 'Offline') -and $Offline) {
     try {
       foreach ($f in 'config.json', 'tokenizer.json', 'vocabulary.txt', 'model.bin') {
         $label = if ($f -eq 'model.bin') { 'Whisper (offline speech)' } else { "Whisper $f" }
-        Get-File "https://huggingface.co/Systran/faster-whisper-small.en/resolve/main/$f" (Join-Path $w "$f.part") $label
+        Get-File (Get-WhisperUrl 'small.en' $f) (Join-Path $w "$f.part") $label "small.en/$f"
         Move-Item -Force (Join-Path $w "$f.part") (Join-Path $w $f)
       }
     } catch { Info "direct download failed: $($_.Exception.Message)" }
@@ -232,6 +268,11 @@ if ((Want 'Offline') -and $Offline) {
       # O'Brien in the path would break a quoted string.
       $env:JARVIS_WHISPER_DIR = $w
       & $vpy -c "import os; from faster_whisper import download_model as d; d('small.en', output_dir=os.environ['JARVIS_WHISPER_DIR'])" 2>&1 | Out-Host
+      # Checked like the direct download: a model that is not the known one goes.
+      foreach ($f in 'config.json', 'tokenizer.json', 'vocabulary.txt', 'model.bin') {
+        $p = Join-Path $w $f
+        if (Test-Path $p) { try { Assert-Sha $p "small.en/$f" } catch { Info "Whisper $f failed its safety check and was deleted" } }
+      }
     }
     Get-ChildItem $w -Filter '*.part' -ErrorAction SilentlyContinue | Remove-Item -Force
     if (Test-Path (Join-Path $w 'model.bin')) { Ok 'Whisper downloaded' }

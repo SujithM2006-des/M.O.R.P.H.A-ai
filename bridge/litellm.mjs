@@ -124,8 +124,22 @@ async function resolveModels(keys) {
  */
 const DROP = `      additional_drop_params: ["prompt_cache_key", "safety_identifier", "service_tier"]`
 
+/**
+ * The keys never go into litellm.yaml: it names an environment variable
+ * ("os.environ/JARVIS_KEY_GEMINI") and the real key is handed to the LiteLLM
+ * process alone, in its environment, when it is started. The file on disk
+ * holds no secret (keys.json is encrypted; see bridge/secrets.mjs).
+ */
+let keyEnv = {}
+const keyRef = (id, key) => {
+  const name = `JARVIS_KEY_${id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
+  keyEnv[name] = key
+  return q(`os.environ/${name}`)
+}
+
 function writeConfig() {
   const keys = readKeys()
+  keyEnv = {}
   const lines = ['model_list:']
   let any = false
   for (const [id, p] of Object.entries(PROVIDERS)) {
@@ -141,7 +155,7 @@ function writeConfig() {
       `  - model_name: ${q(proxyModel(id))}`,
       `    litellm_params:`,
       `      model: ${q(model.startsWith(p.prefix) ? model : p.prefix + model)}`,
-      `      api_key: ${q(keys[id].key)}`,
+      `      api_key: ${keyRef(id, keys[id].key)}`,
       // A provider that stops answering is treated like one out of quota:
       // fail in 40 s so JARVIS can move to the next instead of hanging.
       `      timeout: 40`,
@@ -157,7 +171,7 @@ function writeConfig() {
       `  - model_name: ${q(proxyModel('gemini') + '-lite')}`,
       `    litellm_params:`,
       `      model: ${q('gemini/' + resolved.geminiLite)}`,
-      `      api_key: ${q(keys.gemini.key)}`,
+      `      api_key: ${keyRef('gemini', keys.gemini.key)}`,
       `      timeout: 40`,
       `      reasoning_effort: "minimal"`,
       DROP,
@@ -172,7 +186,7 @@ function writeConfig() {
         `  - model_name: ${q(name)}`,
         `    litellm_params:`,
         `      model: ${q('openrouter/' + m)}`,
-        `      api_key: ${q(keys.openrouter.key)}`,
+        `      api_key: ${keyRef('openrouter', keys.openrouter.key)}`,
         `      timeout: 40`,
         DROP,
       )
@@ -234,7 +248,7 @@ export async function startProxy({ force = false } = {}) {
   masterKey = `sk-jarvis-${randomBytes(18).toString('hex')}`
   // No database: LiteLLM reads DATABASE_URL (set for some other project on
   // this PC) as a request to keep one, and exits when it cannot set it up.
-  const env = { ...process.env, LITELLM_MASTER_KEY: masterKey, LITELLM_LOG: 'ERROR', PYTHONIOENCODING: 'utf-8' }
+  const env = { ...process.env, ...keyEnv, LITELLM_MASTER_KEY: masterKey, LITELLM_LOG: 'ERROR', PYTHONIOENCODING: 'utf-8' }
   delete env.DATABASE_URL
   delete env.DIRECT_URL
   proc = spawn(EXE, ['--config', CONFIG, '--host', '127.0.0.1', '--port', String(PROXY_PORT)], {

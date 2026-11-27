@@ -123,6 +123,17 @@ export async function pageText(url, maxChars = 12000) {
 const RISKY_PY =
   /\b(os\.(remove|unlink|rmdir|removedirs|system|popen)|shutil\.(rmtree|move)|send2trash|subprocess|Path\([^)]*\)\.(unlink|rmdir)|\.unlink\(|\.rmdir\(|format\s+[a-z]:|winreg|ctypes)/i
 
+/** Python that reaches the network (could send data out): needs the user's yes. */
+const NETWORK_PY = /\b(requests|urllib|http\.client|httpx|aiohttp|socket|smtplib|ftplib|paramiko|websocket)\b/i
+
+/**
+ * Python that names a private place - the app's own data (memory, keys,
+ * logins), the browsers' saved logins, Windows' credential stores, key
+ * folders: refused outright (the same rule as run_powershell, bridge/pc.mjs).
+ */
+const PRIVATE_PY =
+  /\.jarvis(?![\\/]+(workspace|python-work)\b)|\.ollama|\.ssh|\.gnupg|\.aws\b|\.azure\b|Chrome[\\/]+User Data|Edge[\\/]+User Data|BraveSoftware|Mozilla[\\/]+Firefox|Microsoft[\\/]+(Credentials|Protect|Vault)|win32cred|keyring|bridge-token|keys\.json|social-cookies/i
+
 async function runPython(code, timeoutSec = 120) {
   if (!existsSync(PY)) throw new Error("JARVIS's Python is not installed (the wake listener's environment).")
   mkdirSync(OUT.work, { recursive: true })
@@ -205,6 +216,18 @@ export function skillsServer() {
           timeout_seconds: z.number().optional().describe('Default 120, at most 600'),
         },
         async ({ code, purpose, confirmed, timeout_seconds = 120 }) => {
+          if (PRIVATE_PY.test(code)) {
+            return failText(
+              "Not run: this code touches private data (the assistant's own memory and keys, saved browser logins " +
+                'or Windows credentials). That is never done on request - tell the user it was refused.',
+            )
+          }
+          if (NETWORK_PY.test(code) && confirmed !== true) {
+            return failText(
+              `Not run: this code connects to the internet and could send data out (${purpose}). Tell the user ` +
+                'where it connects and what it sends, and only if they say yes, call again with confirmed: true.',
+            )
+          }
           if (RISKY_PY.test(code) && confirmed !== true) {
             return failText(
               `Not run: this code can delete, move or run things (${purpose}). Ask the user to confirm ` +
