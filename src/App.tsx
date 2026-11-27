@@ -491,8 +491,14 @@ export default function App() {
     if (phase === 'waking' || phase === 'listening') return
     if (Date.now() - lastWakeAt.current < WAKE_DEDUP_MS) return
     if (phase === 'speaking' || phase === 'thinking' || phase === 'tooling') {
+      // Quiet, and listening — but the work goes on. This used to interrupt
+      // the request too, so one false "Hey Jarvis" (a TV, a name said in
+      // passing) threw away a video two minutes in. The turn is only moved to
+      // the background (it stops speaking and driving the screen, and still
+      // writes its answer into the conversation); a new request, if one
+      // follows, supersedes it as any request does.
       silence()
-      interrupt()
+      turn.current++
       store.getState().setActiveTool(null)
       music.working(false)
       music.duck(false)
