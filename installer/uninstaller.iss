@@ -1,17 +1,16 @@
 ; J.A.R.V.I.S. — standalone uninstaller (Inno Setup 6): JARVIS-Uninstall.exe
 ;
-; A small file to share next to the setup file. It finds the J.A.R.V.I.S.
-; that JARVIS-Setup installed (Windows' "Installed apps" record) and removes
-; it with that install's own uninstaller: the program folder, the Start menu
-; entries, both desktop switches, the "Hey Jarvis" sign-in entry and the
-; record itself — asking before the user's settings and data go.
+; A small file to share next to the setup file. It removes J.A.R.V.I.S. from
+; the PC — the copy JARVIS-Setup installed and any other J.A.R.V.I.S. folder
+; (installer\remove-jarvis.ps1 does the work) — and keeps the user's memory
+; and personal files, so a reinstall remembers them. It shows exactly what it
+; found and will delete, and asks first.
 ;
 ; It installs nothing and never touches the setup file. It does not remove
 ; Node.js, Python, Chrome, ffmpeg or Ollama: other programs may use them.
-; If the install is broken (its uninstaller deleted), it cleans up itself.
 ;
-;   JARVIS-Uninstall.exe              asks, then uninstalls
-;   JARVIS-Uninstall.exe /VERYSILENT  no questions (the user's data is kept)
+;   JARVIS-Uninstall.exe              shows what it found, asks, then removes
+;   JARVIS-Uninstall.exe /VERYSILENT  no questions (memory is still kept)
 
 #ifndef AppVersion
   #define AppVersion "2.0.0"
@@ -54,11 +53,12 @@ MinVersion=10.0
 SetupAppTitle=J.A.R.V.I.S. Uninstaller
 SetupWindowTitle=J.A.R.V.I.S. Uninstaller
 
-[Code]
-const
-  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupAppId}_is1';
+[Files]
+; The work itself (installer\remove-jarvis.ps1): extracted to a temporary folder.
+Source: "remove-jarvis.ps1"; Flags: dontcopy
 
-{ /SILENT or /VERYSILENT on the command line. }
+[Code]
+{ /SILENT or /VERYSILENT on the command line: no questions. }
 function Quiet: Boolean;
 var
   I: Integer;
@@ -69,71 +69,77 @@ begin
       Result := True;
 end;
 
-{ The install's record, per user first (the setup installs per user). }
-function ReadRecord(Name: String; var Value: String): Boolean;
-begin
-  Result := RegQueryStringValue(HKCU, UninstallKey, Name, Value);
-  if not Result then
-    Result := RegQueryStringValue(HKLM, UninstallKey, Name, Value);
-end;
-
-{ No working uninstaller left: what it would do, done here. }
-procedure CleanUpBroken(Dir: String);
+{ remove-jarvis.ps1 in Scan or Remove mode; its report as lines. }
+function RunScript(Mode: String; Show: Integer; var Lines: TArrayOfString): Boolean;
 var
   Code: Integer;
-  Group: String;
+  Report: String;
 begin
-  if FileExists(Dir + '\installer\uninstall.ps1') then
-    Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + Dir + '\installer\uninstall.ps1" -App "' + Dir + '"',
-         '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if (Dir <> '') and DirExists(Dir) then
-    DelTree(Dir, True, True, True);
-  Group := ExpandConstant('{userprograms}\J.A.R.V.I.S');
-  if DirExists(Group) then
-    DelTree(Group, True, True, True);
-  RegDeleteKeyIncludingSubkeys(HKCU, UninstallKey);
+  Report := ExpandConstant('{tmp}\report-' + Mode + '.txt');
+  Result := Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\remove-jarvis.ps1') +
+                 '" -Mode ' + Mode + ' -Report "' + Report + '"', '', Show, ewWaitUntilTerminated, Code)
+            and LoadStringsFromFile(Report, Lines);
+end;
+
+{ "TYPE|value" -> value, for one TYPE (all of them, one per line). }
+function Pick(Lines: TArrayOfString; Kind: String): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if Pos(Kind + '|', Lines[I]) = 1 then
+    begin
+      if Result <> '' then Result := Result + #13#10;
+      Result := Result + '   ' + Copy(Lines[I], Length(Kind) + 2, Length(Lines[I]));
+    end;
 end;
 
 function InitializeSetup(): Boolean;
 var
-  Uninst, Dir, Args: String;
-  Code: Integer;
+  Scan, Done: TArrayOfString;
+  Installed, Copies, Kept, Msg, Summary: String;
+  I: Integer;
 begin
   { Nothing to show: this file does its job and closes. }
   Result := False;
+  ExtractTemporaryFile('remove-jarvis.ps1');
 
-  if not ReadRecord('UninstallString', Uninst) then
+  if not RunScript('Scan', SW_HIDE, Scan) then
   begin
-    if not Quiet then
-      MsgBox('J.A.R.V.I.S. is not installed on this PC (for this Windows account), so there is nothing to remove.',
-             mbInformation, MB_OK);
+    if not Quiet then MsgBox('Could not look for J.A.R.V.I.S. on this PC.', mbError, MB_OK);
     Exit;
   end;
-  Uninst := RemoveQuotes(Uninst);
-  ReadRecord('InstallLocation', Dir);
-  Dir := RemoveBackslashUnlessRoot(RemoveQuotes(Dir));
+  Installed := Pick(Scan, 'INSTALLED');
+  Copies := Pick(Scan, 'COPY');
+  Kept := Pick(Scan, 'DATA_KEEP');
+  if (Installed = '') and (Copies = '') then
+  begin
+    if not Quiet then
+      MsgBox('J.A.R.V.I.S. is not on this PC (for this Windows account), so there is nothing to remove.', mbInformation, MB_OK);
+    Exit;
+  end;
 
   if not Quiet then
-    if MsgBox('Remove J.A.R.V.I.S. from this PC?' + #13#10#13#10 +
-              'Installed in: ' + Dir + #13#10#13#10 +
-              'This removes the program, its Start menu entries, the desktop switches and the "Hey Jarvis" sign-in entry. ' +
-              'You will be asked whether to keep your settings and data.' + #13#10#13#10 +
-              'Node.js, Python, Chrome and the other programs it uses are kept (other apps may need them). ' +
-              'The J.A.R.V.I.S. setup file is not touched.',
-              mbConfirmation, MB_YESNO) <> IDYES then
-      Exit;
+  begin
+    Msg := 'Remove J.A.R.V.I.S. from this PC?' + #13#10#13#10;
+    if Installed <> '' then Msg := Msg + 'The installed J.A.R.V.I.S.:' + #13#10 + Installed + #13#10#13#10;
+    if Copies <> '' then Msg := Msg + 'Other J.A.R.V.I.S. folders found (these whole folders are DELETED):' + #13#10 + Copies + #13#10#13#10;
+    Msg := Msg + 'Also removed: the desktop switches, the "Hey Jarvis" sign-in entry, the Start menu entries, and ' +
+           'J.A.R.V.I.S.''s downloads (voice models, its Python, its Chrome logins, logs).' + #13#10#13#10 +
+           'KEPT, so a reinstall remembers you: your memory and personal files' + #13#10 +
+           Kept + #13#10#13#10 +
+           'Not touched: the J.A.R.V.I.S. setup file, your backups, and Node.js, Python, Chrome and the other programs it used.';
+    if MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then Exit;
+  end;
 
-  if FileExists(Uninst) then
+  { The window shows the progress. }
+  RunScript('Remove', SW_SHOW, Done);
+  if not Quiet then
   begin
-    if Quiet then Args := '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' else Args := '';
-    if not Exec(Uninst, Args, '', SW_SHOW, ewWaitUntilTerminated, Code) then
-      CleanUpBroken(Dir);
-  end
-  else
-  begin
-    CleanUpBroken(Dir);
-    if not Quiet then
-      MsgBox('J.A.R.V.I.S. has been removed. (Its own uninstaller was missing, so the files were removed directly; your settings and data in ' +
-             ExpandConstant('{%USERPROFILE}') + '\.jarvis were kept.)', mbInformation, MB_OK);
+    Summary := '';
+    for I := 0 to GetArrayLength(Done) - 1 do Summary := Summary + Done[I] + #13#10;
+    MsgBox('J.A.R.V.I.S. has been removed.' + #13#10#13#10 + Summary + #13#10 +
+           'To install it again, run the J.A.R.V.I.S. setup file: it will remember you.', mbInformation, MB_OK);
   end;
 end;

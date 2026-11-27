@@ -148,9 +148,10 @@ begin
   begin
     Data := ExpandConstant('{%USERPROFILE}\.jarvis');
     if DirExists(Data) and (not UninstallSilent) then
-      if MsgBox('Also delete your J.A.R.V.I.S. settings and data?' + #13#10#13#10 + Data + #13#10#13#10 +
-                'This holds your profile, API keys, memory, reminders, routines and the downloaded voice models.' + #13#10 +
-                'Choose No to keep them (for example, to reinstall later).',
+      if MsgBox('J.A.R.V.I.S. has been removed, including its downloads (voice models, its Python, its Chrome logins).' + #13#10#13#10 +
+                'Your memory and personal files are still kept in:' + #13#10 + Data + #13#10 +
+                '(memory, profile, reminders, routines, history, AI keys) - so if you install J.A.R.V.I.S. again, it remembers you.' + #13#10#13#10 +
+                'Delete them too?  Choose No to keep them.',
                 mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
         DelTree(Data, True, True, True);
   end;

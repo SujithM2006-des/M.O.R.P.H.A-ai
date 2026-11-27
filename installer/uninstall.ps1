@@ -57,6 +57,16 @@ function Points-Here([string]$lnk) {
 }
 $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'JARVIS wake listener.lnk'
 if ((Test-Path $startup) -and (Points-Here $startup)) { Remove-Item $startup -Force }
+# .jarvis: J.A.R.V.I.S.'s downloads go (voice models, its Python, its Chrome
+# logins, logs); memory and personal files stay, so a reinstall remembers the
+# user. (The same list as installer\remove-jarvis.ps1.)
+$keep = @(
+  'memory.md', 'profile.json', 'reminders.json', 'routines.json', 'named-routines.json', 'history.jsonl',
+  'past-events.json', 'flow.json', 'keys.json', 'feedback.jsonl', 'popup-mode', 'brain-choice',
+  'ui-styles', 'workspace', 'python-work'
+)
+Get-ChildItem -LiteralPath $data -Force | Where-Object { $keep -notcontains $_.Name } | Remove-Item -Recurse -Force
+
 # Both desktop switches: "JARVIS Kill Switch" and "Popup Kill Switch".
 foreach ($name in 'JARVIS Kill Switch', 'Popup Kill Switch') {
   $switchDir = Join-Path ([Environment]::GetFolderPath('Desktop')) $name
