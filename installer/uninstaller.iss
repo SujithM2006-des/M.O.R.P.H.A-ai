@@ -79,6 +79,21 @@ ExitSetupMessage=J.A.R.V.I.S. has not been removed.%n%nExit the uninstaller?
 var
   Scan: TArrayOfString;
   Done: String;
+  Keep: LongWord;
+
+{ While a step runs, Setup disables its own window, and a disabled window
+  ignores its title-bar buttons: Minimize did nothing. A timer keeps the
+  window enabled (Cancel stays off: no stopping half-way), so it can be
+  minimized as usual. }
+function SetTimer(hWnd, nIDEvent, uElapse, lpTimerFunc: LongWord): LongWord; external 'SetTimer@user32.dll stdcall';
+function KillTimer(hWnd, uIDEvent: LongWord): Boolean; external 'KillTimer@user32.dll stdcall';
+function EnableWindow(hWnd: HWND; bEnable: Boolean): Boolean; external 'EnableWindow@user32.dll stdcall';
+
+procedure KeepMinimizable(H, Msg, IdEvent, Time: LongWord);
+begin
+  WizardForm.CancelButton.Enabled := False;
+  EnableWindow(WizardForm.Handle, True);
+end;
 
 { remove-jarvis.ps1, hidden: Scan, or one Remove step. Its report as lines. }
 function RunScript(Args: String; var Lines: TArrayOfString): Boolean;
@@ -157,6 +172,7 @@ begin
   Common := ' -Mode Remove -Copies "' + Copies + '"';
   Done := '';
   N := 5;
+  Keep := SetTimer(0, 0, 250, CreateCallback(@KeepMinimizable));
   Progress(0, N, 'Stopping J.A.R.V.I.S....');
   RunScript(Common + ' -Only Stop', Lines);
   Progress(1, N, 'Removing the installed J.A.R.V.I.S....');
@@ -171,6 +187,7 @@ begin
   Progress(4, N, 'Removing downloads (voice models, Python, logs)...');
   RunScript(Common + ' -Only Data', Lines);
   for I := 0 to GetArrayLength(Lines) - 1 do Done := Done + Lines[I] + #13#10;
+  KillTimer(0, Keep);
   Progress(5, N, 'Done.');
 end;
 

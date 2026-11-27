@@ -19,10 +19,10 @@ for each of them.
   - Ollama            offline answers (Full / offline mode only)
 
 Then it downloads J.A.R.V.I.S.'s packages and, depending on what you choose,
-the speech models. A window shows the progress; it takes about 15-30 minutes
-(Standard) and longer for Full (about 5 GB more), depending on the internet.
-One step - the Python packages - shows no progress for several minutes:
-that is normal, please leave the window open.
+the speech models. The setup window shows each step as it goes; it takes
+about 15-30 minutes (Standard) and longer for Full (about 5 GB more),
+depending on the internet. One step - the Python packages - stays on the
+same message for several minutes: that is normal, please wait.
 
 Desktop switches (you can choose them during setup)
 ---------------------------------------------------

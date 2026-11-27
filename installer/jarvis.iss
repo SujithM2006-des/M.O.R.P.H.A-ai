@@ -4,10 +4,11 @@
 ; secrets or personal files) and passes:
 ;   /DAppVersion=2.0.0  /DStage=<staging folder>  /DOutDir=<where the .exe goes>
 ;
-; The setup installs per user (no admin needed; "all users" can be chosen),
-; shows the licence and copyright, lets the user pick the wake word and the
-; offline mode, then runs installer\postinstall.ps1 for what a file copy
-; cannot do (Node packages, Python, voice models, prerequisites).
+; The setup installs per user (no admin needed), shows the licence and
+; copyright, lets the user pick the wake word and the offline mode, then runs
+; installer\postinstall.ps1 - hidden, one step at a time under its own
+; progress bar - for what a file copy cannot do (Node packages, Python, voice
+; models, prerequisites).
 
 #ifndef AppVersion
   #define AppVersion "2.0.0"
@@ -106,7 +107,8 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\installer\launch.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\installer\jarvis.ico"; Comment: "Start J.A.R.V.I.S."; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\postinstall.ps1"" -App ""{app}""{code:SetupArgs}"; StatusMsg: "Setting up J.A.R.V.I.S. (prerequisites, packages, voice) - a window shows the progress. This can take a while..."; Flags: waituntilterminated
+; The set-up itself (postinstall.ps1) runs hidden from [Code] below, step by
+; step under the setup's own progress bar: no console window.
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\installer\launch.vbs"""; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -136,7 +138,110 @@ begin
   if WizardIsTaskSelected('autostart') then Result := Result + ' -Autostart';
   if WizardIsTaskSelected('jarvisswitch') then Result := Result + ' -JarvisSwitch';
   if WizardIsTaskSelected('popupswitch') then Result := Result + ' -PopupSwitch';
-  if WizardSilent then Result := Result + ' -NoPause';
+end;
+
+var
+  Problems: String;
+  StepText: String;
+  Keep: LongWord;
+
+{ While a step runs, Setup disables its own window, and a disabled window
+  ignores its title-bar buttons: Minimize did nothing. A timer keeps the
+  window enabled (Cancel stays off), so it can be minimized as usual. }
+function SetTimer(hWnd, nIDEvent, uElapse, lpTimerFunc: LongWord): LongWord; external 'SetTimer@user32.dll stdcall';
+function KillTimer(hWnd, uIDEvent: LongWord): Boolean; external 'KillTimer@user32.dll stdcall';
+function EnableWindow(hWnd: HWND; bEnable: Boolean): Boolean; external 'EnableWindow@user32.dll stdcall';
+
+procedure KeepMinimizable(H, Msg, IdEvent, Time: LongWord);
+begin
+  WizardForm.CancelButton.Enabled := False;
+  EnableWindow(WizardForm.Handle, True);
+end;
+
+{ Each output line of the running step (hidden), shown under the step so a
+  long step visibly moves: "Collecting pandas", "Downloading ...". }
+procedure ShowLine(const S: String; const Error, FirstLine: Boolean);
+var
+  T: String;
+  I: Integer;
+begin
+  T := Trim(S);
+  for I := 1 to Length(T) do
+    if Ord(T[I]) < 32 then T[I] := ' ';
+  if T = '' then Exit;
+  if Length(T) > 95 then T := Copy(T, 1, 92) + '...';
+  WizardForm.FilenameLabel.Caption := StepText + '   ' + T;
+end;
+
+{ One postinstall.ps1 step, hidden (no window), under the progress bar. }
+procedure RunStep(Step, Text: String; N, Total: Integer; Long: Boolean);
+var
+  Code: Integer;
+  Results: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  WizardForm.StatusLabel.Caption := Text;
+  StepText := 'Step ' + IntToStr(N) + ' of ' + IntToStr(Total) + ':';
+  WizardForm.FilenameLabel.Caption := StepText;
+  if Long then
+    WizardForm.ProgressGauge.Style := npbstMarquee
+  else
+  begin
+    WizardForm.ProgressGauge.Style := npbstNormal;
+    WizardForm.ProgressGauge.Max := Total;
+    WizardForm.ProgressGauge.Position := N - 1;
+  end;
+  Results := ExpandConstant('{tmp}\setup-results.txt');
+  DeleteFile(Results);
+  if not ExecAndLogOutput('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+              ExpandConstant('{app}\installer\postinstall.ps1') + '" -App "' + ExpandConstant('{app}') +
+              '" -Only ' + Step + ' -Results "' + Results + '"' + SetupArgs(''),
+              ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code, @ShowLine) then
+    Problems := Problems + '- The "' + Step + '" step could not be started.' + #13#10
+  else if LoadStringsFromFile(Results, Lines) then
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      if Pos('PROBLEM|', Lines[I]) = 1 then
+        Problems := Problems + '- ' + Copy(Lines[I], 9, Length(Lines[I])) + #13#10;
+  WizardForm.ProgressGauge.Style := npbstNormal;
+  WizardForm.ProgressGauge.Max := Total;
+  WizardForm.ProgressGauge.Position := N;
+end;
+
+{ After the files are copied: what a file copy cannot do, one step at a time. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Voice, Off: Boolean;
+  N, Total: Integer;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  Problems := '';
+  Voice := WizardIsComponentSelected('listener') or WizardIsComponentSelected('offline');
+  Off := WizardIsComponentSelected('offline');
+  Total := 6;
+  if Voice then Total := Total + 1;
+  if Off then Total := Total + 1;
+  N := 1;
+  Keep := SetTimer(0, 0, 250, CreateCallback(@KeepMinimizable));
+  RunStep('Node', 'Checking Node.js (installing it if it is missing)...', N, Total, True); N := N + 1;
+  RunStep('Chrome', 'Checking Google Chrome (installing it if it is missing)...', N, Total, True); N := N + 1;
+  RunStep('Ffmpeg', 'Checking ffmpeg (installing it if it is missing)...', N, Total, True); N := N + 1;
+  RunStep('Packages', 'Installing J.A.R.V.I.S. packages...', N, Total, True); N := N + 1;
+  RunStep('Python', 'Setting up Python and its packages - this takes 5-15 minutes, please wait...', N, Total, True); N := N + 1;
+  if Voice then begin RunStep('WakeModel', 'Downloading the "Hey Jarvis" speech model...', N, Total, True); N := N + 1; end;
+  if Off then begin RunStep('Offline', 'Downloading offline mode (Whisper and the offline AI model, about 3 GB)...', N, Total, True); N := N + 1; end;
+  RunStep('Switches', 'Creating the desktop switches...', N, Total, False);
+  KillTimer(0, Keep);
+  WizardForm.StatusLabel.Caption := 'Done.';
+  WizardForm.FilenameLabel.Caption := '';
+end;
+
+{ Finished: anything that needs fixing, in the setup window itself. }
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (Problems <> '') then
+    WizardForm.FinishedLabel.Caption := 'J.A.R.V.I.S. is installed, with some things to fix:' + #13#10#13#10 + Problems + #13#10 +
+      'Fix them, then run the setup file again (it skips what is already done). Details: Start menu > J.A.R.V.I.S. > Setup log.';
 end;
 
 { The user's settings and data are theirs: asked, and kept unless they say so. }
