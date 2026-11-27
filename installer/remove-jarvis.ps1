@@ -29,11 +29,18 @@ param(
   [string]$ProgramsDir = [Environment]::GetFolderPath('Programs'),
   [string]$HealthUrl = 'http://127.0.0.1:8787/health',
   [string]$RegistryKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{8E2C6F4A-3B1D-4C7E-9A52-6D1F0B7E3A91}_is1',
+  # One step at a time (the uninstaller's progress bar): Stop, Installed,
+  # Copies, Shortcuts, Data - or All.
+  [ValidateSet('All', 'Stop', 'Installed', 'Copies', 'Shortcuts', 'Data')] [string]$Only = 'All',
+  # The folders the scan found ("a|b"), so the later steps still know them
+  # once J.A.R.V.I.S. is stopped (a stopped bridge no longer says where it is).
+  [string]$Copies = '',
   # For testing: don't stop anything, and don't look at running processes
   # (those would point at the real J.A.R.V.I.S. on the test PC).
   [switch]$NoStop,
   [switch]$NoProcessScan
 )
+function Step([string]$name) { return ($Only -eq 'All' -or $Only -eq $name) }
 
 $ErrorActionPreference = 'SilentlyContinue'
 $data = Join-Path $HomeDir '.jarvis'
@@ -82,6 +89,7 @@ if (-not $NoProcessScan) {
     ForEach-Object { if ($_.CommandLine -match '([A-Za-z]:\\[^"]+?)\\scripts\\wake_listener\.py') { [void]$found.Add((Norm $matches[1])) } }
 }
 
+if ($Copies) { foreach ($c in $Copies -split '\|') { if ($c) { [void]$found.Add((Norm $c)) } } }
 $others = @($found | Where-Object { (Is-Jarvis $_) -and ($_ -ine $installed) } | Sort-Object -Unique)
 $dataItems = @(Get-ChildItem -LiteralPath $data -Force | Where-Object { $keep -notcontains $_.Name })
 $kept = @(Get-ChildItem -LiteralPath $data -Force | Where-Object { $keep -contains $_.Name })
@@ -97,7 +105,7 @@ if ($Mode -eq 'Scan') {
 }
 
 # --- remove -------------------------------------------------------------------
-if (-not $NoStop) {
+if ((Step 'Stop') -and -not $NoStop) {
   Say 'Stopping J.A.R.V.I.S....'
   $owner = (Get-NetTCPConnection -LocalPort 8787 -State Listen | Select-Object -First 1).OwningProcess
   if ($owner) {
@@ -117,8 +125,8 @@ if (-not $NoStop) {
 }
 
 # The installed copy, with its own uninstaller (quietly: the data is handled below).
-if ($installed) {
-  Say "Removing the installed J.A.R.V.I.S. ($installed)..."
+if ((Step 'Installed') -and $installed) {
+  Say "Removed the installed J.A.R.V.I.S. ($installed)"
   if ($uninst -and (Test-Path -LiteralPath $uninst)) {
     Start-Process -FilePath $uninst -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
     # It hands over to a copy of itself: wait for the record to go.
@@ -129,22 +137,33 @@ if ($installed) {
 }
 
 # Every other J.A.R.V.I.S. copy.
-foreach ($o in $others) {
-  if (-not (Is-Jarvis $o)) { continue }
-  Say "Removing J.A.R.V.I.S. at $o..."
-  & cmd.exe /c rd /s /q "`"$o`""
-  if (Test-Path -LiteralPath $o) { Say "  could not remove all of $o (a file in use?)" }
+if (Step 'Copies') {
+  foreach ($o in $others) {
+    if (-not (Is-Jarvis $o)) { continue }
+    Say "Removed J.A.R.V.I.S. at $o"
+    & cmd.exe /c rd /s /q "`"$o`""
+    # A folder another program has open (an editor) stays, empty.
+    if (Test-Path -LiteralPath $o) {
+      if (@(Get-ChildItem -LiteralPath $o -Force).Count) { Say "  some of it could not be removed (in use) - close it and run this again" }
+      else { Say '  (the empty folder stays while another program has it open)' }
+    }
+  }
 }
 
 # Shortcuts: the switches, the sign-in entry, Start menu and desktop entries.
-foreach ($d in 'JARVIS Kill Switch', 'Popup Kill Switch') { Remove-Item (Join-Path $DesktopDir $d) -Recurse -Force }
-Remove-Item (Join-Path $StartupDir 'JARVIS wake listener.lnk') -Force
-Get-ChildItem $DesktopDir -Filter 'J.A.R.V.I.S*.lnk' | Remove-Item -Force
-Get-ChildItem $ProgramsDir -Directory -Filter 'J.A.R.V.I.S*' | Remove-Item -Recurse -Force
-Say 'Removed the desktop switches, the sign-in entry and the Start menu entries.'
+if (Step 'Shortcuts') {
+  foreach ($d in 'JARVIS Kill Switch', 'Popup Kill Switch') { Remove-Item (Join-Path $DesktopDir $d) -Recurse -Force }
+  Remove-Item (Join-Path $StartupDir 'JARVIS wake listener.lnk') -Force
+  Get-ChildItem $DesktopDir -Filter 'J.A.R.V.I.S*.lnk' | Remove-Item -Force
+  Get-ChildItem $ProgramsDir -Directory -Filter 'J.A.R.V.I.S*' | Remove-Item -Recurse -Force
+  Say 'Removed the desktop switches, the "Hey Jarvis" sign-in entry and the Start menu entries.'
+}
 
 # .jarvis: everything except memory and personal data.
-foreach ($i in $dataItems) { Remove-Item -LiteralPath $i.FullName -Recurse -Force }
-$left = @(Get-ChildItem -LiteralPath $data -Force | ForEach-Object Name)
-Say "Kept your memory and personal files in $data$(if ($left.Count) { ': ' + ($left -join ', ') })."
+if (Step 'Data') {
+  foreach ($i in $dataItems) { Remove-Item -LiteralPath $i.FullName -Recurse -Force }
+  Say "Removed J.A.R.V.I.S.'s downloads (voice models, its Python, its Chrome logins, logs)."
+  $left = @(Get-ChildItem -LiteralPath $data -Force | ForEach-Object Name)
+  Say "Kept your memory and personal files in $data$(if ($left.Count) { ': ' + ($left -join ', ') })."
+}
 $lines | Set-Content -Path $Report -Encoding UTF8
