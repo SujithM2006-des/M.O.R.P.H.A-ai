@@ -83,6 +83,29 @@ through your Claude account.
 
 ## Setup
 
+### The easy way: the setup file
+
+Run **`JARVIS-Setup-2.0.0.exe`** — a normal Windows installer (no admin
+needed). It shows the licence, lets you choose Standard (online, with the
+"Hey Jarvis" wake word), Full (also works offline) or Minimal, installs what is
+missing (Node.js, Python 3.11, Chrome, ffmpeg, and Ollama for offline mode)
+through Windows' own installer, downloads the packages and speech models, and
+adds Start menu and desktop shortcuts. Uninstall it from Windows Settings →
+Apps; it asks before removing your own settings and data (`~/.jarvis`).
+Running the setup file again repairs an install.
+
+To build the setup file yourself (needs Inno Setup 6:
+`winget install JRSoftware.InnoSetup --scope user`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build.ps1   # -> Downloads\jarvis final\JARVIS-Setup-2.0.0.exe
+```
+
+It packages only the files in git, so `.env.local` and your own look never get
+in. The installer's parts are in `installer\`.
+
+### By hand
+
 ```bat
 git clone https://github.com/SujithM2006-des/jarvisv2.git
 cd jarvisv2

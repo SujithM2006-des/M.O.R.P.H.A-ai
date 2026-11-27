@@ -1370,7 +1370,9 @@ const handleRequest = async (req, res) => {
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
     // `clients` is how many JARVIS windows are connected; the background wake
     // listener (scripts/wake_listener.py) stands down while there is one.
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, clients: CLIENTS.size, brain: brainMode(), model: isLocalBrain() ? brainState().model : null }))
+    // `app`: the folder this JARVIS runs from, so an uninstaller stops only its
+    // own copy (not another one on the same PC).
+    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, clients: CLIENTS.size, brain: brainMode(), model: isLocalBrain() ? brainState().model : null, app: resolvePath(SCRIPTS, '..') }))
   }
 
   // "Hey Jarvis" from the background wake listener (scripts/wake_listener.py),

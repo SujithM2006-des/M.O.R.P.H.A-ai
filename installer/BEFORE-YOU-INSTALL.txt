@@ -1,0 +1,51 @@
+J.A.R.V.I.S. - before you install
+=================================
+
+What you need
+-------------
+  - Windows 10 or 11 (64-bit)
+  - An internet connection during setup
+  - A microphone and speakers (for talking to J.A.R.V.I.S.)
+  - Free disk space: about 3 GB (Standard), about 9 GB (Full, with offline mode)
+
+What the setup installs for you (if they are not there already)
+---------------------------------------------------------------
+Using Windows' own installer (winget). Windows may ask for permission once
+for each of them.
+  - Node.js           runs J.A.R.V.I.S.
+  - Python 3.11       voice, documents and the free AI accounts
+  - Google Chrome     the J.A.R.V.I.S. window
+  - ffmpeg            video and picture editing
+  - Ollama            offline answers (Full / offline mode only)
+
+Then it downloads J.A.R.V.I.S.'s packages and, depending on what you choose,
+the speech models. A window shows the progress; it takes about 15-30 minutes
+(Standard) and longer for Full (about 5 GB more), depending on the internet.
+One step - the Python packages - shows no progress for several minutes:
+that is normal, please leave the window open.
+
+Desktop switches (you can choose them during setup)
+---------------------------------------------------
+  - JARVIS - ON / OFF        the kill switch: double-click to turn J.A.R.V.I.S.
+                             and "Hey Jarvis" off (or back on). Stays off
+                             across restarts until switched on again.
+  - JARVIS Popup - ON / OFF  the small popup as J.A.R.V.I.S.'s face, or the
+                             main window.
+Both are also in the Start menu.
+
+After setup
+-----------
+  - J.A.R.V.I.S. opens and asks your name and how you want it to sound.
+  - To think, it needs at least one AI account. The free ones (Gemini,
+    OpenRouter, Groq) are set up from its Customize screen by signing in -
+    nothing to copy or paste. A Claude subscription is optional.
+  - Say "health check" at any time: it tells you what is missing and how to
+    fix it.
+
+Your data
+---------
+Your settings, keys, memory and reminders are kept on this PC only, in
+%USERPROFILE%\.jarvis. Uninstalling asks whether to keep them.
+
+J.A.R.V.I.S. is free software under the MIT License (next page).
+Copyright (C) 2026 Sujith M. Based on JARVIS by Aditya Dewaskar.

@@ -110,7 +110,7 @@ function Stop-Jarvis {
     ForEach-Object { & taskkill.exe /T /F /PID $_.ProcessId | Out-Null }
   # The onscreen popup.
   Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-    Where-Object { $_.CommandLine -like '*jarvis-main*popup.ps1*' } |
+    Where-Object { $_.CommandLine -like "*$([Management.Automation.WildcardPattern]::Escape((Split-Path -Leaf $root)))*popup.ps1*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   # Ollama (the offline model): only for JARVIS, so off with him — its tray
   # app, its server and any model it has loaded.
