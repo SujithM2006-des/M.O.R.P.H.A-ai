@@ -1360,6 +1360,20 @@ function AskBar() {
   }, [])
   const inChat = useChat()
   const listening = !muted && (phase === 'listening' || phase === 'waking')
+  // What is being said shows in the text box as it is heard (the orb keeps its
+  // own caption). When listening stops, what the voice put here is cleared.
+  const heard = useJarvis().caption
+  const fromVoice = useRef(false)
+  useEffect(() => {
+    const words = heard.trim()
+    if (listening && words && words !== '…') {
+      fromVoice.current = true
+      setText(words)
+    } else if (!listening && fromVoice.current) {
+      fromVoice.current = false
+      setText('')
+    }
+  }, [heard, listening])
 
   // Files to send with the request: 📎, dropped on the bar, or pasted (Ctrl+V,
   // a screenshot too). Uploaded and prepared when it is sent.
