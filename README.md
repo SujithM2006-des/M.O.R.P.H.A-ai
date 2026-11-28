@@ -70,9 +70,15 @@ through your Claude account.
 ## Requirements
 
 - **Windows 10 or 11**
-- **Claude Code, installed and logged in** — `npm install -g @anthropic-ai/claude-code`,
-  then run `claude` once and log in. Usage is billed to your Claude account.
-- **Node.js 20+** — <https://nodejs.org>
+- **An AI to think with — any one of these, free or paid:**
+  - **Free:** a Gemini, Groq or OpenRouter key (each has a free plan; sign in with
+    Google, no card). Set one up in Setup.
+  - **Free, offline:** a local model through Ollama, no account at all.
+  - **Paid, optional:** a Claude subscription, signed in through Claude Code. Morpha
+    uses Claude first when it is signed in, and switches to the free AIs when Claude
+    is at its limit. Claude Code is not required otherwise.
+- **Node.js 20+** — <https://nodejs.org>. The setup file installs it for you if it is
+  missing; you only need it yourself when running from source.
 - **Google Chrome**
 - **Python 3.10+** — only for the offline "Hey Morpha" wake word and the
   ON/OFF switch. Everything else works without it.
@@ -177,8 +183,9 @@ Open it again any time from the **Profile** button in the sidebar. Your profile,
 memory and history stay on your own PC in `%USERPROFILE%\.jarvis` — nothing of
 yours is in this repository, and nothing of anyone else's is in your copy.
 
-For the brain, sign in to **your own** Claude Code account (`claude` in a
-terminal) — every copy uses its owner's account.
+The brain works on any free or paid AI you set up in Setup. If you use Claude, sign
+in to **your own** account (`claude` in a terminal) — every copy uses its owner's
+account, and nothing is shared between copies.
 
 M.O.R.P.H.A. was created by **Sujith M**. That is fixed in the code
 (`bridge/profile.mjs`), not a setting, and he will always say so.
