@@ -1170,7 +1170,9 @@ async function getKey(provider, say) {
     await create.first().click({ timeout: 15_000 })
     await page.waitForTimeout(2000)
     // A name box, if it asks for one.
-    const nameBox = page.locator('[role="dialog"] input[type="text"], [role="dialog"] input:not([type]), input[placeholder*="name" i]').filter({ visible: true })
+    // Only the dialog's own text box: a page-level search box also says "name",
+    // and it was getting the key's name (the list search) instead.
+    const nameBox = page.getByRole('dialog').locator('input[type="text"], input:not([type])').filter({ visible: true })
     if (await nameBox.count()) await nameBox.first().fill('Morpha').catch(() => {})
     // OpenRouter also requires an expiration and a credit limit before Create
     // lights up: take "no limit" / "never" when offered, else the first choice.
