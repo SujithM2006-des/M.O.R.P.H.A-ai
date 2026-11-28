@@ -2500,6 +2500,8 @@ setInterval(async () => {
  * two, over the 8,000 a minute; without them it fits.
  */
 const LIGHT_SERVERS = ['jarvis_assistant', 'jarvis_news']
+/** The on-PC servers the free AIs get: display, PC control, assistant, news. */
+const FREE_SERVERS = ['jarvis', 'jarvis_pc', 'jarvis_assistant', 'jarvis_news']
 
 /** The session's options for the brain in use. */
 function withBrain(o) {
@@ -2557,6 +2559,12 @@ function withBrain(o) {
     viaProxy.maxTurns = 8
     viaProxy.mcpServers = Object.fromEntries(Object.entries(o.mcpServers).filter(([k]) => LIGHT_SERVERS.includes(k)))
     viaProxy.systemPrompt = identityPrompt() + LIGHT_PROMPT + memoryPrompt()
+  }
+  // Gemini and OpenRouter: a full question sent every tool server the app has
+  // (about 41,000 tokens), which the free plans refuse. Only the on-PC servers go
+  // to them; the account connectors and the rest stay on Claude.
+  if (id === 'gemini' || id === 'openrouter') {
+    viaProxy.mcpServers = Object.fromEntries(Object.entries(o.mcpServers).filter(([k]) => FREE_SERVERS.includes(k)))
   }
   return viaProxy
 }
