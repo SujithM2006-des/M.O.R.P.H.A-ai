@@ -375,7 +375,7 @@ export function Setup() {
               <small>
                 Shown as {dottedName(form.assistant)} · say “Hey {nameWord(spokenName(form.assistant))}”, “Hello{' '}
                 {nameWord(spokenName(form.assistant))}” or just “{nameWord(spokenName(form.assistant))}” to call
-                {spokenName(form.assistant).toLowerCase() === 'jarvis' ? '' : ' (“Hey Jarvis” works too)'}.
+                {spokenName(form.assistant).toLowerCase() === 'morpha' ? '' : ' (“Hey Morpha” works too)'}.
               </small>
             </label>
           </div>
@@ -546,7 +546,7 @@ export function Setup() {
             {/* Nothing to think with yet: say so plainly, before the list. */}
             {accounts && !accounts.claude?.connected && !accounts.gemini?.connected && !accounts.openrouter?.connected && !accounts.groq?.connected && (
               <p className="su-acc-need">
-                Sign in to at least one below — Gemini or OpenRouter is best (free, and they can use all of JARVIS's tools).
+                Sign in to at least one below — Gemini or OpenRouter is best (free, and they can use all of Morpha's tools).
               </p>
             )}
             <ul className="su-accounts">

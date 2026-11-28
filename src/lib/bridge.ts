@@ -396,12 +396,12 @@ function connect(): Promise<WebSocket> {
       settle(
         new Error(
           trusted
-            ? "Jarvis's background service isn't answering, so I couldn't do that. " +
+            ? "Morpha's background service isn't answering, so I couldn't do that. " +
                 'It restarts by itself after a crash — ask again in a few seconds. ' +
-                'If this keeps happening, close Jarvis and start it again.'
+                'If this keeps happening, close Morpha and start it again.'
             : `Cannot reach the bridge at ${BRIDGE_WS_URL}: this page is on port ` +
                 `${location.port || '80'}, and the bridge only accepts localhost:5173-5199 ` +
-                'and 4173-4199. Open Jarvis from one of those ports.',
+                'and 4173-4199. Open Morpha from one of those ports.',
         ),
       )
     }
@@ -669,5 +669,7 @@ export function interrupt(): void {
 function prettyToolName(raw: string): string {
   if (!raw.startsWith('mcp__')) return raw
   const [, server, ...rest] = raw.split('__')
-  return `${server} · ${rest.join(' ').replace(/_/g, ' ')}`
+  // The server key stays (permissions use it); what is shown says Morpha.
+  const shown = server.replace(/^jarvis_?/i, 'morpha ').trim().replace(/_/g, ' ')
+  return `${shown} · ${rest.join(' ').replace(/_/g, ' ')}`
 }

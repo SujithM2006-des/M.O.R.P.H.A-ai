@@ -319,7 +319,7 @@ const blankSession = (id = `s${Date.now().toString(36)}`): Session => ({ id, tit
 function titleFrom(text: string): string {
   const t = text
     .replace(/^\[.*?\]\s*/, '')
-    .replace(/^(hey |ok |okay )?jarvis[,\s]*/i, '')
+    .replace(/^(hey |ok |okay )?(morpha|jarvis)[,\s]*/i, '')
     .replace(/\s+/g, ' ')
     .trim()
   if (!t) return NEW_TITLE

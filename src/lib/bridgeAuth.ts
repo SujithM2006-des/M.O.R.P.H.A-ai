@@ -40,7 +40,7 @@ function readKey(): string | null {
 export function bridgeKey(): string {
   const key = readKey()
   if (!key) {
-    throw new Error('No bridge key: open JARVIS from its launcher (start-jarvis.bat), not the dev address.')
+    throw new Error('No bridge key: open Morpha from its launcher (start-jarvis.bat), not the dev address.')
   }
   return key
 }
