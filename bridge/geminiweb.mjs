@@ -1155,7 +1155,7 @@ async function getKey(provider, say) {
     if (provider === 'gemini') {
       const rows = page.locator('tr, [role="row"]').filter({ has: page.getByRole('button', { name: 'Copy API key' }) })
       if (await rows.count()) {
-        const mine = rows.filter({ hasText: /\bjarvis\b/i })
+        const mine = rows.filter({ hasText: /\b(morpha|jarvis)\b/i })
         const row = (await mine.count()) ? mine.first() : rows.first()
         await row.getByRole('button', { name: 'Copy API key' }).click()
         await page.waitForTimeout(1200)
@@ -1164,14 +1164,32 @@ async function getKey(provider, say) {
       }
     }
 
-    // Otherwise create a new one named "Jarvis".
-    say(`Creating a ${site.label} key named "Jarvis"…`)
+    // Otherwise create a new one named "Morpha" (every AI's key carries that name).
+    say(`Creating a ${site.label} key named "Morpha"…`)
     const create = visibleButton(page, /create (api )?key|new key/i)
     await create.first().click({ timeout: 15_000 })
     await page.waitForTimeout(2000)
     // A name box, if it asks for one.
     const nameBox = page.locator('[role="dialog"] input[type="text"], [role="dialog"] input:not([type]), input[placeholder*="name" i]').filter({ visible: true })
-    if (await nameBox.count()) await nameBox.first().fill('Jarvis').catch(() => {})
+    if (await nameBox.count()) await nameBox.first().fill('Morpha').catch(() => {})
+    // OpenRouter also requires an expiration and a credit limit before Create
+    // lights up: take "no limit" / "never" when offered, else the first choice.
+    for (const [trigger, pick] of [
+      [/select expiration/i, /never|no expir|no limit|unlimited/i],
+      [/choose a credit limit/i, /no limit|unlimited|never/i],
+    ]) {
+      const opener = page.locator('[role="dialog"] button, [role="dialog"] [role="combobox"]').filter({ hasText: trigger }).filter({ visible: true })
+      if (!(await opener.count())) continue
+      await opener.first().click().catch(() => {})
+      await page.waitForTimeout(600)
+      const options = page.locator('[role="option"], [role="listbox"] li, [role="menuitem"]').filter({ visible: true })
+      const texts = await options.allInnerTexts().catch(() => [])
+      if (texts.length) {
+        const at = Math.max(0, texts.findIndex((t) => pick.test(t)))
+        await options.nth(at).click().catch(() => {})
+      }
+      await page.waitForTimeout(500)
+    }
     // The dialog's confirm button (Gemini may also ask which project: a new one is fine).
     for (const name of [/create api key in new project/i, /^\s*(create( key| api key)?|submit|save)\s*$/i]) {
       const btn = page.locator('[role="dialog"] button, [role="dialog"] [role="button"], .cdk-overlay-container button, form button').filter({ hasText: name }).filter({ visible: true })
