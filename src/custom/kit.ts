@@ -1,3 +1,4 @@
+import { bfetch } from '../lib/bridgeAuth'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { BRIDGE_HTTP_URL } from '../config'
 import { useStore } from '../store'
@@ -116,7 +117,7 @@ export function useStatus(ms = 3000): Status | null {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/status`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/status`, { cache: 'no-store' })
         if (res.ok && alive) set(await res.json())
       } catch {
         /* bridge down: keep the last reading */
@@ -139,25 +140,54 @@ export function useStatus(ms = 3000): Status | null {
  * Status said LIVE until something was asked.
  */
 export function useBridgeUp(): boolean {
-  const [up, setUp] = useState(true)
-  useEffect(() => {
-    let alive = true
-    const check = async () => {
-      try {
-        const r = await fetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(2500) })
-        if (alive) setUp(r.ok)
-      } catch {
-        if (alive) setUp(false)
-      }
+  return useHealth().up
+}
+
+/**
+ * The live state for the status chips, from the bridge's /health (every 4 s):
+ *   up        the background service answers
+ *   brain     'cloud' (online), 'local' (offline, on the local model) or 'none'
+ *   listener  the background "Hey <name>" listener: 'listening', 'muted',
+ *             'off' (the kill switch) or 'stopped' (not running)
+ * One poll shared by every chip that reads it.
+ */
+export type Health = { up: boolean; brain: 'cloud' | 'local' | 'none'; listener: 'listening' | 'muted' | 'off' | 'stopped' }
+let health: Health = { up: true, brain: 'cloud', listener: 'listening' }
+const healthSubs = new Set<() => void>()
+let healthTimer = 0
+async function pollHealth() {
+  let next: Health
+  try {
+    const r = await bfetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(2500) })
+    const j = (await r.json().catch(() => ({}))) as Partial<Health> & { brain?: string; listener?: string }
+    next = {
+      up: r.ok,
+      brain: j.brain === 'local' || j.brain === 'none' ? j.brain : 'cloud',
+      listener: j.listener === 'muted' || j.listener === 'off' || j.listener === 'stopped' ? j.listener : 'listening',
     }
-    void check()
-    const id = window.setInterval(check, 4000)
+  } catch {
+    next = { ...health, up: false }
+  }
+  if (next.up !== health.up || next.brain !== health.brain || next.listener !== health.listener) {
+    health = next
+    healthSubs.forEach((f) => f())
+  }
+}
+export function useHealth(): Health {
+  const [, bump] = useState(0)
+  useEffect(() => {
+    const f = () => bump((n) => n + 1)
+    healthSubs.add(f)
+    if (healthSubs.size === 1) {
+      void pollHealth()
+      healthTimer = window.setInterval(pollHealth, 4000)
+    }
     return () => {
-      alive = false
-      window.clearInterval(id)
+      healthSubs.delete(f)
+      if (!healthSubs.size) window.clearInterval(healthTimer)
     }
   }, [])
-  return up
+  return health
 }
 
 const muteSubs = new Set<() => void>()
@@ -178,7 +208,7 @@ export function useMuted(): boolean {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/popup/state`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/popup/state`, { cache: 'no-store' })
         if (res.ok && alive) set(Boolean((await res.json()).muted))
       } catch {
         /* bridge down: keep the last reading */
@@ -234,7 +264,7 @@ export function useProfile(): Profile | null {
   }, [])
   useEffect(() => {
     let alive = true
-    fetch(`${BRIDGE_HTTP_URL}/profile`, { cache: 'no-store' })
+    bfetch(`${BRIDGE_HTTP_URL}/profile`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (alive && j) {
@@ -277,7 +307,7 @@ export function useBrains(): Brains | null {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/brains`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/brains`, { cache: 'no-store' })
         if (res.ok && alive) set(await res.json())
       } catch {
         /* bridge down: keep the last reading */
@@ -321,7 +351,7 @@ export function useUsage(): Usage | null {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/usage`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/usage`, { cache: 'no-store' })
         if (res.ok && alive) set(await res.json())
       } catch {
         /* bridge down: keep the last reading */
@@ -405,7 +435,7 @@ export function useSchedule(): CalEvent[] {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/schedule`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/schedule`, { cache: 'no-store' })
         if (res.ok && alive) set((await res.json()).events ?? [])
       } catch {
         /* bridge down: keep the last list */
@@ -424,7 +454,7 @@ export function useSchedule(): CalEvent[] {
 /** Add an event at a local date and time ("2026-11-15T10:00"). Returns an error message, or null. */
 export async function addEvent(at: string, text: string): Promise<string | null> {
   try {
-    const res = await fetch(`${BRIDGE_HTTP_URL}/schedule`, {
+    const res = await bfetch(`${BRIDGE_HTTP_URL}/schedule`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ at: new Date(at).toISOString(), text }),
@@ -440,7 +470,7 @@ export async function addEvent(at: string, text: string): Promise<string | null>
 /** Remove an event. */
 export async function removeEvent(id: string): Promise<void> {
   try {
-    await fetch(`${BRIDGE_HTTP_URL}/schedule/delete`, {
+    await bfetch(`${BRIDGE_HTTP_URL}/schedule/delete`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id }),
@@ -545,7 +575,9 @@ export const phaseLabel: Record<JarvisPhase, string> = {
   // key, and that click starts him. "Offline", in red, read as broken.
   offline: 'Tap to start',
   boot: 'Starting',
-  dormant: 'Online',
+  // At rest and ready. (It said "Online", which read as the internet status -
+  // and stayed "Online" when the internet was gone. That has its own pill now.)
+  dormant: 'Ready',
   waking: 'Listening',
   listening: 'Listening',
   thinking: 'Thinking',
@@ -560,7 +592,7 @@ export function greeting(d: Date = new Date()): string {
 }
 
 const post = (path: string, body?: unknown) =>
-  fetch(`${BRIDGE_HTTP_URL}${path}`, {
+  bfetch(`${BRIDGE_HTTP_URL}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body ?? {}),
@@ -583,6 +615,58 @@ export const ask = (text: string): Promise<boolean> => {
   if (local?.(t)) return Promise.resolve(true)
   return post('/popup/ask', { text: t })
 }
+/** Files that can be attached: documents, pictures, voice clips, videos. */
+export const ATTACH_ACCEPT =
+  'image/*,video/*,audio/*,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.txt,.md,.csv,.json,.py,.java,.c,.cpp,.js,.ts,.html,.css'
+
+/** The most files one request can carry (the bridge takes ten). */
+export const MAX_ATTACH = 10
+
+/**
+ * Attach files to a request from this window: each is uploaded to the bridge
+ * (a page cannot hand over file paths), then made ready there exactly as the
+ * popup's files are - a video becomes stills plus a transcript of what is said,
+ * Office files become text. Returns the block that goes under the request (""
+ * if nothing could be attached) and any problems, for showing.
+ */
+export async function attachFiles(files: File[]): Promise<{ block: string; problems: string[] }> {
+  const paths: string[] = []
+  const problems: string[] = []
+  for (const f of files.slice(0, MAX_ATTACH)) {
+    try {
+      const r = await bfetch(`${BRIDGE_HTTP_URL}/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(f.name || 'pasted-image.png') },
+        body: f,
+      })
+      const j = (await r.json().catch(() => ({}))) as { path?: string; error?: string }
+      if (r.ok && j.path) paths.push(j.path)
+      else problems.push(`${f.name}: ${j.error ?? `upload failed (${r.status})`}`)
+    } catch {
+      problems.push(`${f.name}: the app's background service is not answering`)
+    }
+  }
+  if (!paths.length) return { block: '', problems }
+  try {
+    const r = await bfetch(`${BRIDGE_HTTP_URL}/attach`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    })
+    const j = (await r.json().catch(() => ({}))) as { block?: string; problems?: string[] }
+    return { block: j.block ?? '', problems: [...problems, ...(j.problems ?? [])] }
+  } catch {
+    return { block: '', problems: [...problems, "the app's background service is not answering"] }
+  }
+}
+
+/** A request with its files as a person would say it: "summarise this 📎 report.pdf". */
+export function shownRequest(text: string): string {
+  return String(text ?? '')
+    .replace(/\n\n\[Attached files: ([^\]\n]*)\][\s\S]*$/, (_m, names: string) => ` 📎 ${names.split(' | ').join(', ')}`)
+    .trim()
+}
+
 /** Start listening now (or, if already listening, stand by). */
 export const listen = () => post('/popup/mic')
 /** Mute or unmute the microphone (toggles without an argument). */

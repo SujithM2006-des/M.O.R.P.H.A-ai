@@ -25,8 +25,33 @@ MODEL = next(
 )
 
 
+_WHISPER = Path(os.environ["USERPROFILE"]) / ".jarvis" / "whisper"
+
+
+def whisper(path):
+    """Whisper (faster-whisper, int8 on the CPU) when installed: it understands
+    real speech far better than Vosk. base.en first (fast), else small.en.
+    None when it is not installed or fails, so Vosk is used instead."""
+    model_dir = next((p for p in (_WHISPER / "base.en", _WHISPER / "small.en") if (p / "model.bin").exists()), None)
+    if not model_dir:
+        return None
+    try:
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel(str(model_dir), device="cpu", compute_type="int8", cpu_threads=min(8, os.cpu_count() or 4))
+        segs, _ = model.transcribe(path, language="en", beam_size=1, vad_filter=True, condition_on_previous_text=False)
+        return " ".join(s.text.strip() for s in segs).strip()
+    except Exception:
+        return None
+
+
 def main(path):
     SetLogLevel(-1)
+    text = whisper(path)
+    if text is not None:
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(text)
+        return
     if not MODEL.exists():
         sys.exit("The offline speech model is not installed (~/.jarvis/vosk).")
     with wave.open(path, "rb") as wav:

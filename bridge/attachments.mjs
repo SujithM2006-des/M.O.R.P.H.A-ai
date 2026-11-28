@@ -1,6 +1,10 @@
-import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { basename, extname, isAbsolute, join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { createWriteStream, existsSync } from 'node:fs'
+import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { findTool } from './creator.mjs'
 import { protectedProblem, ps } from './pc.mjs'
 
 /**
@@ -15,8 +19,12 @@ import { protectedProblem, ps } from './pc.mjs'
  */
 
 const ROOT = join(tmpdir(), 'jarvis-attach')
+/** Files the main window uploads (it cannot hand over paths): kept here, briefly. */
+export const UPLOAD_DIR = join(ROOT, 'uploads')
 const MAX_FILES = 10
 const MAX_BYTES = 30 * 1024 * 1024
+/** Videos are bigger: up to 500 MB (only stills and the speech are kept from them). */
+export const MAX_VIDEO_BYTES = 500 * 1024 * 1024
 const KEEP_MS = 24 * 60 * 60 * 1000
 
 const OFFICE = new Set(['.docx', '.pptx', '.xlsx'])
@@ -25,6 +33,74 @@ const IMAGE_OK = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 const IMAGE_CONVERT = new Set(['.bmp', '.tif', '.tiff', '.ico'])
 const OLD_OFFICE = new Set(['.doc', '.ppt', '.xls'])
 const AUDIO = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.webm', '.flac'])
+/** Videos (.webm may be either: one with no picture is treated as audio). */
+const VIDEO = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.avi', '.wmv', '.3gp', '.webm', '.mpeg', '.mpg', '.flv'])
+
+const PY = join(homedir(), '.jarvis', 'wake-venv', 'Scripts', 'python.exe')
+const TRANSCRIBE = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'transcribe.py')
+
+/** A program's output, whatever its exit code (ffmpeg -i "fails" by design). */
+function runAny(file, args, timeoutMs) {
+  return new Promise((res) => {
+    execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) =>
+      res({ ok: !err, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), why: err?.killed ? 'took too long' : err?.message }),
+    )
+  })
+}
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+/**
+ * A video, made readable: the model cannot watch one, but it can look at
+ * pictures and read text. So: stills from across it (4 for a short clip, 6
+ * otherwise) and what is said in it, transcribed offline (Whisper when
+ * installed, else Vosk - scripts/transcribe.py; the first 10 minutes).
+ * Returns the items, or null when the file has no picture (an audio .webm).
+ */
+async function videoItems(copy, name, sub) {
+  const ff = findTool('ffmpeg')
+  if (!ff) {
+    return [{ name, path: copy, note: 'video - ffmpeg is not installed, so it could not be opened; say so and suggest running the setup file again' }]
+  }
+  const probe = (await runAny(ff, ['-hide_banner', '-i', copy], 30_000)).stderr
+  if (!/Stream #[^\n]*Video:/.test(probe)) return null
+  const d = probe.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/)
+  const secs = d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0
+  const items = []
+
+  const n = secs && secs <= 20 ? 4 : 6
+  for (let i = 0; i < n; i++) {
+    const t = secs ? ((i + 0.5) * secs) / n : i
+    const jpg = join(sub, `frame-${i + 1}.jpg`)
+    const r = await runAny(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', t.toFixed(2), '-i', copy, '-frames:v', '1', '-vf', 'scale=768:-2', '-q:v', '4', jpg], 60_000)
+    if (r.ok && existsSync(jpg)) items.push({ name: `${name}, still at ${clock(t)}`, path: jpg, note: 'image - a frame from the video' })
+  }
+
+  if (/Stream #[^\n]*Audio:/.test(probe) && existsSync(PY)) {
+    const wav = join(sub, 'speech.wav')
+    const a = await runAny(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-i', copy, '-t', '600', '-vn', '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', wav], 180_000)
+    if (a.ok && existsSync(wav)) {
+      const t = await runAny(PY, ['-I', TRANSCRIBE, wav], 15 * 60_000)
+      const words = t.ok ? t.stdout.trim() : ''
+      const txt = join(sub, 'what-is-said.txt')
+      await writeFile(txt, words || '(no speech was recognised in it)', 'utf8')
+      items.push({
+        name: `${name}, what is said`,
+        path: txt,
+        note: `transcript of the video's speech${secs > 600 ? ' (first 10 minutes)' : ''}, made offline - it may have mistakes`,
+      })
+      await rm(wav, { force: true })
+    }
+  }
+  items.push({
+    name,
+    path: copy,
+    note:
+      `the video itself (${secs ? clock(secs) + ' long' : 'length unknown'}) - Read cannot open a video: use its stills ` +
+      'and transcript above; pass this path to edit_video if they want it edited',
+  })
+  return items
+}
 
 // Office Open XML is a zip of XML parts: read the text out of the parts that
 // hold it. Paths arrive through env vars (see ps() in pc.mjs), never the script.
@@ -108,15 +184,19 @@ try { $img.Save($env:JARVIS_OUT, [Drawing.Imaging.ImageFormat]::Png) } finally {
 
 /** Remove copies older than a day. Never throws. */
 async function sweep() {
-  try {
-    const now = Date.now()
-    for (const d of await readdir(ROOT)) {
-      const p = join(ROOT, d)
-      const s = await stat(p).catch(() => null)
-      if (s && now - s.mtimeMs > KEEP_MS) await rm(p, { recursive: true, force: true }).catch(() => {})
+  const now = Date.now()
+  // The prepared copies, and (one level down) the window's uploads.
+  for (const base of [ROOT, UPLOAD_DIR]) {
+    try {
+      for (const d of await readdir(base)) {
+        if (base === ROOT && d === 'uploads') continue
+        const p = join(base, d)
+        const s = await stat(p).catch(() => null)
+        if (s && now - s.mtimeMs > KEEP_MS) await rm(p, { recursive: true, force: true }).catch(() => {})
+      }
+    } catch {
+      /* nothing there yet */
     }
-  } catch {
-    /* nothing there yet */
   }
 }
 
@@ -143,16 +223,21 @@ export async function prepareAttachments(paths) {
       if (bad) throw new Error(bad)
       const info = await stat(src)
       if (!info.isFile()) throw new Error('it is a folder, not a file')
-      if (info.size > MAX_BYTES) throw new Error('it is larger than 30 MB')
-
       const ext = extname(name).toLowerCase()
+      if (VIDEO.has(ext) ? info.size > MAX_VIDEO_BYTES : info.size > MAX_BYTES) {
+        throw new Error(VIDEO.has(ext) ? 'it is larger than 500 MB' : 'it is larger than 30 MB')
+      }
       // A numbered sub-folder per file, so two files with the same name coexist.
       const sub = join(dir, String(items.length + 1))
       await mkdir(sub, { recursive: true })
       const copy = join(sub, name)
       await copyFile(src, copy)
 
-      if (OFFICE.has(ext)) {
+      // A video: stills and its speech (an audio-only .webm falls through to audio).
+      const video = VIDEO.has(ext) ? await videoItems(copy, name, sub) : null
+      if (video) {
+        items.push(...video)
+      } else if (OFFICE.has(ext)) {
         const txt = `${copy}.txt`
         await ps(EXTRACT, { SRC: copy, OUT: txt, EXT: ext }, 60_000)
         items.push({ name, path: txt, note: `the text of ${name}, extracted` })
@@ -212,21 +297,68 @@ export async function prepareAttachments(paths) {
   return { items, problems }
 }
 
-/** The request as the model receives it: their words, then the files. */
-export function composeWithAttachments(text, { items, problems }) {
-  if (!items.length && !problems.length) return text
-  const ask = text || 'Have a look at what I have attached and tell me briefly what it is.'
-  const lines = [
-    ask,
-    '',
-    `[Attached files: ${items.map((i) => i.name).join(' | ') || 'none'}]`,
+/**
+ * The files part of a request: what goes under the user's words. Each video's
+ * stills and transcript are listed as their own items, so the header names the
+ * files themselves (one entry per original file).
+ */
+export function attachmentBlock({ items, problems }) {
+  const originals = [...new Set(items.map((i) => i.name.replace(/, (still at [\d:]+|what is said)$/, '')))]
+  return [
+    `[Attached files: ${originals.join(' | ') || 'none'}]`,
     ...items.map((i) => `- ${i.name} (${i.note}): ${i.path}`),
     ...problems.map((p) => `- Could not attach ${p}`),
     'Open every attached document and image with the Read tool before answering — images and ' +
-      'PDFs show as they are, Word/Excel/PowerPoint arrive as extracted text (audio cannot be ' +
-      'read). Then do what I asked with them. Never read file paths aloud.',
-  ]
-  return lines.join('\n')
+      'PDFs show as they are, Word/Excel/PowerPoint arrive as extracted text, a video arrives as ' +
+      'stills plus a transcript of what is said (audio and video files themselves cannot be read). ' +
+      'Then do what I asked with them. Never read file paths aloud.',
+  ].join('\n')
+}
+
+/** The request as the model receives it: their words, then the files. */
+export function composeWithAttachments(text, att) {
+  if (!att.items.length && !att.problems.length) return text
+  const ask = text || 'Have a look at what I have attached and tell me briefly what it is.'
+  return `${ask}\n\n${attachmentBlock(att)}`
+}
+
+/**
+ * A file uploaded by the main window, streamed to UPLOAD_DIR under its own
+ * folder. The name is reduced to a safe file name; the size is capped while
+ * it streams. Returns its path (only ever inside UPLOAD_DIR).
+ */
+export async function saveUpload(req, rawName) {
+  void sweep()
+  let name = basename(String(rawName ?? '').replace(/[\\/]+/g, '/')).replace(/[<>:"|?*\u0000-\u001f]/g, '_').trim()
+  if (!name || name === '.' || name === '..') name = 'upload'
+  const ext = extname(name).toLowerCase()
+  const limit = VIDEO.has(ext) ? MAX_VIDEO_BYTES : MAX_BYTES
+  const dir = join(UPLOAD_DIR, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  await mkdir(dir, { recursive: true })
+  const path = join(dir, name.slice(0, 120))
+  await new Promise((res, rej) => {
+    let size = 0
+    const out = createWriteStream(path)
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        req.destroy()
+        out.destroy()
+        rej(new Error(`it is larger than ${limit / 1024 / 1024} MB`))
+      }
+    })
+    req.on('error', rej)
+    out.on('error', rej)
+    out.on('finish', res)
+    req.pipe(out)
+  })
+  return path
+}
+
+/** True only for a file the window uploaded (its path is inside UPLOAD_DIR). */
+export function isUpload(p) {
+  const rel = relative(UPLOAD_DIR, resolvePath(String(p ?? '')))
+  return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
 /** The same request as a person would describe it — for the popup and the journal. */

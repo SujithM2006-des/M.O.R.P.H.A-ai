@@ -31,7 +31,7 @@ import { openApp } from './pc.mjs'
 import { status as telemetry, statusReady as telemetryReady } from './telemetry.mjs'
 import { spawn as spawnProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { FEATURES, identityPrompt, readProfile, saveProfile } from './profile.mjs'
 import { naturalSay, naturalVoices, warmNaturalVoices } from './voices.mjs'
 
@@ -158,7 +158,51 @@ const popupState = { phase: 'offline', heard: '', said: '', tool: '', muted: fal
  * made fresh at every start and kept in the user's own ~/.jarvis — the popup
  * and the wake listener read it from there.
  */
-const BRIDGE_TOKEN = randomBytes(24).toString('hex')
+/**
+ * The key is kept from one start to the next (in ~/.jarvis/bridge-token), so the
+ * window, which the launcher gives the key once, stays valid across a bridge
+ * restart. It is only as private as that file, which is the user's own.
+ */
+const BRIDGE_TOKEN = (() => {
+  try {
+    const saved = readFileSync(join(homedir(), '.jarvis', 'bridge-token'), 'utf8').trim()
+    if (/^[0-9a-f]{48}$/.test(saved)) return saved
+  } catch {
+    /* none yet */
+  }
+  return randomBytes(24).toString('hex')
+})()
+
+/**
+ * True if `given` is the local key. Compared in constant time, so a program
+ * cannot learn the key a character at a time from how long a refusal takes.
+ */
+function keyMatches(given) {
+  const a = Buffer.from(String(given ?? ''))
+  const b = Buffer.from(BRIDGE_TOKEN)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/**
+ * GET routes that show settings, keys, accounts or history. They need the key
+ * even though they are reads. Images, /health and the page routes stay open
+ * because an <img> tag cannot send a header.
+ */
+const KEYED_GETS = new Set([
+  '/keys',
+  '/keys/auto',
+  '/accounts',
+  '/profile',
+  '/usage',
+  '/brains',
+  '/checkup',
+  '/status',
+  '/voices',
+  '/schedule',
+  '/pending-command',
+  '/undo',
+  '/popup/state',
+])
 /**
  * Saved only once this bridge actually holds the port (see server.listen).
  * Written at load, a second bridge started while one was running — which then
@@ -369,7 +413,7 @@ const DOCK_APPS = {
 }
 import { addSchedule, assistantServer, memoryPrompt, removeSchedule, scheduleList, startScheduler, toast } from './assistant.mjs'
 import { journalPrompt, record as recordExchange } from './journal.mjs'
-import { composeWithAttachments, prepareAttachments, tidyAttached } from './attachments.mjs'
+import { attachmentBlock, composeWithAttachments, isUpload, prepareAttachments, saveUpload, tidyAttached } from './attachments.mjs'
 import { customizeServer } from './customize.mjs'
 
 /** Every open Jarvis window. */
@@ -384,7 +428,7 @@ const announce = (text) => {
   askOne({ type: 'announce', text })
 }
 import { homedir, tmpdir } from 'node:os'
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
@@ -1344,7 +1388,8 @@ function corsFor(req) {
   const headers = { vary: 'origin' }
   if (origin) {
     headers['access-control-allow-origin'] = origin
-    headers['access-control-allow-headers'] = 'content-type'
+    // x-file-name: the window's uploads carry the file's name in it.
+    headers['access-control-allow-headers'] = 'content-type, x-file-name, x-jarvis-token'
   }
   return headers
 }
@@ -1371,11 +1416,13 @@ const handleRequest = async (req, res) => {
     return res.end()
   }
 
-  // Commands from outside a browser need the local key (see BRIDGE_TOKEN).
-  // Pages are already held to their Origin above; GETs for images and the
-  // health check stay open, the popup's live state does not.
-  const command = req.method === 'POST' || req.url === '/popup/state' || req.url === '/schedule'
-  if (command && !origin && !ALLOW_NO_ORIGIN && req.headers['x-jarvis-token'] !== BRIDGE_TOKEN) {
+  // Every command and every state read needs the local key (see BRIDGE_TOKEN),
+  // whatever the Origin says. The Origin is only a claim a program can make; the
+  // key is what a program without ~/.jarvis/bridge-token cannot supply. The window
+  // is given the key by the launcher (start-jarvis.bat, scripts/splash.html).
+  const path = (req.url ?? '/').split('?')[0]
+  const needsKey = req.method === 'POST' || (req.method === 'GET' && (KEYED_GETS.has(path) || path.startsWith('/accounts')))
+  if (needsKey && !ALLOW_NO_ORIGIN && !keyMatches(req.headers['x-jarvis-token'])) {
     // Usually the key file was overwritten (another bridge that never got the
     // port, a test run): put ours back so the popup's next try works, instead
     // of refusing it for the rest of the session.
@@ -1397,7 +1444,17 @@ const handleRequest = async (req, res) => {
     // listener (scripts/wake_listener.py) stands down while there is one.
     // `app`: the folder this JARVIS runs from, so an uninstaller stops only its
     // own copy (not another one on the same PC).
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, clients: CLIENTS.size, brain: brainMode(), model: isLocalBrain() ? brainState().model : null, app: resolvePath(SCRIPTS, '..') }))
+    // `listener`: the background "Hey <name>" listener, from the heartbeat it
+    // rewrites every few seconds - listening, muted, off (the kill switch), or
+    // stopped (no fresh heartbeat). For the window's status chips.
+    let listener = 'stopped'
+    try {
+      const beat = join(homedir(), '.jarvis', 'listener-state')
+      if (Date.now() - statSync(beat).mtimeMs < 15_000) listener = readFileSync(beat, 'utf8').trim() || 'stopped'
+    } catch {
+      /* never started */
+    }
+    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, clients: CLIENTS.size, brain: brainMode(), model: isLocalBrain() ? brainState().model : null, listener, app: resolvePath(SCRIPTS, '..') }))
   }
 
   // "Hey Jarvis" from the background wake listener (scripts/wake_listener.py),
@@ -1602,7 +1659,8 @@ const handleRequest = async (req, res) => {
     // charset stated explicitly: Windows PowerShell (the popup) otherwise
     // decodes as Latin-1 and an em dash in an answer arrives as "â€”".
     res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-    return res.end(JSON.stringify({ ...popupState, connected: CLIENTS.size > 0 }))
+    // `brain`: online ('cloud'), offline mode ('local') or 'none' - the popup shows it.
+    return res.end(JSON.stringify({ ...popupState, connected: CLIENTS.size > 0, brain: brainMode() }))
   }
   if (req.method === 'POST' && req.url === '/popup/show') {
     // Asked for: open it out (or start it opened out).
@@ -1615,16 +1673,53 @@ const handleRequest = async (req, res) => {
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
     return res.end(JSON.stringify({ closed }))
   }
+  // The main window's 📎 (and drag and drop, paste): it cannot hand over file
+  // paths, so each file is uploaded here (raw bytes, its name in a header),
+  // saved in the attachments' temp folder, and its path returned.
+  if (req.method === 'POST' && req.url === '/upload') {
+    try {
+      const path = await saveUpload(req, decodeURIComponent(String(req.headers['x-file-name'] ?? 'upload')))
+      res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+      return res.end(JSON.stringify({ path }))
+    } catch (err) {
+      res.writeHead(413, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+      return res.end(JSON.stringify({ error: String(err.message) }))
+    }
+  }
+  // Then made ready for the model, exactly as the popup's files are (stills
+  // and a transcript for a video, text for Office files …), and returned as the
+  // block that goes under the user's words. Only uploaded files: a page cannot
+  // name any other file on the PC.
+  if (req.method === 'POST' && req.url === '/attach') {
+    const body = await readJson(req)
+    const paths = (Array.isArray(body.paths) ? body.paths : []).map(String).filter(isUpload)
+    const att = await prepareAttachments(paths)
+    console.log(`[jarvis] window attached: ${att.items.map((i) => i.name).join(', ') || 'nothing'}` +
+      (att.problems.length ? ` (problems: ${att.problems.join('; ')})` : ''))
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+    return res.end(JSON.stringify({ block: att.items.length || att.problems.length ? attachmentBlock(att) : '', problems: att.problems }))
+  }
   if (req.method === 'POST' && req.url === '/popup/ask') {
     const body = await readJson(req)
     let text = String(body.text ?? '').trim().slice(0, 2000)
     // Files from the popup (📎, drag and drop, paste): copied where his file
-    // tools can read them, and listed under the request.
+    // tools can read them, and listed under the request. Answered at once and
+    // prepared in the background - a video (stills, then what is said in it)
+    // can take minutes, and the popup waited in its own window, frozen.
     if (Array.isArray(body.files) && body.files.length) {
-      const att = await prepareAttachments(body.files)
-      console.log(`[jarvis] popup attached: ${att.items.map((i) => i.name).join(', ') || 'nothing'}` +
-        (att.problems.length ? ` (problems: ${att.problems.join('; ')})` : ''))
-      text = composeWithAttachments(text, att)
+      const files = body.files
+      const shown = text
+      popupState.heard = `${shown || 'Attached files'} 📎`
+      popupState.said = 'Preparing the attached files…'
+      void (async () => {
+        const att = await prepareAttachments(files)
+        console.log(`[jarvis] popup attached: ${att.items.map((i) => i.name).join(', ') || 'nothing'}` +
+          (att.problems.length ? ` (problems: ${att.problems.join('; ')})` : ''))
+        const full = composeWithAttachments(shown, att)
+        if (!askOne({ type: 'popup-ask', text: full }) && popupMode()) startWindow(full)
+      })()
+      res.writeHead(202, { ...cors, 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ sent: 1, preparing: true }))
     }
     const sent = text ? askOne({ type: 'popup-ask', text }) : 0
     if (!sent && text && popupMode()) {
@@ -2071,6 +2166,14 @@ const wss = new WebSocketServer({
           ' — set JARVIS_ALLOWED_ORIGINS to permit it',
       )
       return done(false, 403, 'Forbidden')
+    }
+    // A browser cannot set a header on a WebSocket, so the window sends the key
+    // in the URL (?k=...), from the address the launcher gave the window. Origin
+    // alone is not enough: a program can claim any Origin.
+    const wsKey = new URL(req.url ?? '/', 'http://x').searchParams.get('k')
+    if (!ALLOW_NO_ORIGIN && !keyMatches(wsKey)) {
+      console.warn(`[jarvis] rejected websocket from origin ${origin ?? '(none)'}: no valid local key`)
+      return done(false, 401, 'Unauthorized')
     }
     done(true)
   },
@@ -3352,6 +3455,19 @@ wss.on('connection', (socket) => {
 
     if (msg.type === 'interrupt') {
       conversations.get(sessionOf(msg))?.interrupt()
+    }
+
+    // The window switched to (or opened) a chat: start its agent now, while
+    // the user is still typing or speaking. Starting the agent and its tool
+    // servers is what made the first question of a chat take ~4.5 s instead
+    // of ~1 s (measured); warm, that wait is gone. An idle agent makes no
+    // requests and costs no tokens. The session limit (MAX_SESSIONS) holds.
+    if (msg.type === 'warm') {
+      const sid = sessionOf(msg)
+      if (!conversations.has(sid)) {
+        conversation(sid)
+        console.log(`[jarvis] warmed up ${sid === 'main' ? 'the main conversation' : `chat ${sid}`}`)
+      }
     }
 
     // A session closed in the window: its agent stops and is freed.

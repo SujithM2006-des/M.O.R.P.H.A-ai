@@ -429,7 +429,10 @@
       const params = new URLSearchParams(location.search)
       // JARVIS's own port (vite.config.ts) — not 5173, which other projects use.
       const FACE = 'http://localhost:5188/'
-      const target = FACE + '?from=splash' + (params.get('wake') === '1' ? '&wake=1' : '')
+      // The bridge key, handed on to the app in its address (bridge/server.mjs
+      // and src/lib/bridgeAuth.ts). Only a key of the expected shape is passed on.
+      const bridgeKey = /^[0-9a-f]{48}$/.test(params.get('k') ?? '') ? '&k=' + params.get('k') : ''
+      const target = FACE + '?from=splash' + (params.get('wake') === '1' ? '&wake=1' : '') + bridgeKey
       const fill = document.getElementById('fill')
       const pct = document.getElementById('pct')
       const step = document.getElementById('step')

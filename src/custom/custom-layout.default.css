@@ -2559,3 +2559,78 @@ button.vg-avatar.vg-avatar-on { box-shadow: 0 0 0 2px rgba(63, 182, 255, 0.7), 0
 .vg-chat-list { min-width: 0; max-width: min(840px, 100%); }
 .vg-cm-user { max-width: min(78%, 680px); }
 .vg-chat-head { min-width: 0; }
+
+/* ------------------------------------------------ attachments (📎 in the ask bar) */
+.vg-ask .vg-attach {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 4px;
+  border-radius: 11px;
+  color: var(--ink-2, #a8c8ec) !important;
+  border: 1px solid var(--edge) !important;
+  transition: all 0.2s var(--ease);
+}
+.vg-ask .vg-attach:hover:not(:disabled) {
+  color: var(--accent) !important;
+  background: rgba(63, 182, 255, 0.12) !important;
+}
+.vg-ask .vg-attach:disabled { opacity: 0.4; cursor: default; }
+.vg-ask .vg-attach:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The chosen files, as chips floating just above the bar (like its error line). */
+.vg-attach-row {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  pointer-events: auto;
+}
+.vg-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(10, 32, 72, 0.92);
+  border: 1px solid var(--edge-hi);
+  backdrop-filter: blur(6px);
+  animation: vg-pop 0.2s var(--ease);
+}
+.vg-attach-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vg-attach-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: var(--ink-3) !important;
+}
+.vg-attach-chip button:hover { color: #fff !important; background: rgba(224, 70, 90, 0.6) !important; }
+.vg-attach-note {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  color: var(--ink-2, #a8c8ec);
+  background: rgba(6, 20, 46, 0.9);
+}
+.vg-attach-warn { color: #ffcf9a; }
+/* ------------------------------------------------ status: online / offline, listening */
+/* The connection pill: green online (the pill's own colours), amber in offline
+   mode (.vg-pill-offline above), red when the service or the AI is missing. */
+.vg-pill-down { color: #ffb0b0; border-color: rgba(255, 100, 110, 0.55); background: rgba(130, 20, 30, 0.4); }
+.vg-pill-down i { animation: none; }
+/* The voice chip while it is listening: blue, like the mic. */
+.vg-sc.vg-sc-live { color: #9fcbff; border-color: rgba(42, 140, 255, 0.6); background: rgba(20, 60, 150, 0.3); }
+
+/* With files chosen, an error line sits above the chips, not on top of them. */
+.vg-ask-error:has(~ .vg-attach-row) { bottom: calc(100% + 46px); }

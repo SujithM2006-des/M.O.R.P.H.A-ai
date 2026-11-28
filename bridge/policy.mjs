@@ -28,7 +28,7 @@ import { isIP } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
 import { blockedAddress, vetTarget } from './net.mjs'
-import { PC_WRITE_TOOLS } from './pc.mjs'
+import { NETWORK_PS, PC_WRITE_TOOLS, PRIVATE_PS } from './pc.mjs'
 import { CUSTOM_WRITE_TOOLS } from './customize.mjs'
 import { WHATSAPP_WRITE_TOOLS } from './whatsapp.mjs'
 import { CREATOR_WRITE_TOOLS } from './creator.mjs'
@@ -356,6 +356,17 @@ export function checkToolUse(name, input, { allowWrites = false, cwd, roots }) {
       vetTarget(input?.url)
     } catch (err) {
       return { allow: false, reason: `Blocked: that address cannot be fetched (${err.message}).` }
+    }
+  }
+  // The built-in shell tools take a command as text. Read the same rules
+  // run_powershell applies (bridge/pc.mjs): no private places, no network.
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = String(input?.command ?? '')
+    if (PRIVATE_PS.test(command)) {
+      return { allow: false, reason: 'Blocked: that command names a private place (saved logins, keys or the app data).' }
+    }
+    if (NETWORK_PS.test(command) || /\b(curl|wget)\b/i.test(command)) {
+      return { allow: false, reason: 'Blocked: that command reaches the network. Use the web tools to read pages.' }
     }
   }
   return { allow: true }

@@ -1,3 +1,4 @@
+import { bfetch } from '../lib/bridgeAuth'
 import { useEffect, useState } from 'react'
 import { BRIDGE_HTTP_URL } from '../config'
 import {
@@ -148,12 +149,12 @@ export function Setup() {
       setRate(Math.round(currentRate() * 20) / 20)
       setKeyInput({})
       // The keys first (quick), then ChatGPT's sign-in too (a few seconds).
-      fetch(`${BRIDGE_HTTP_URL}/accounts`, { cache: 'no-store' })
+      bfetch(`${BRIDGE_HTTP_URL}/accounts`, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((a) => a && setAccounts(a))
         .catch(() => {})
       setChecked(false)
-      fetch(`${BRIDGE_HTTP_URL}/accounts?check=1`, { cache: 'no-store' })
+      bfetch(`${BRIDGE_HTTP_URL}/accounts?check=1`, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((a) => a && setAccounts(a))
         .catch(() => {})
@@ -194,7 +195,7 @@ export function Setup() {
   // bridge fetches the key itself); its progress shows until it is done.
   const loadAccounts = async (check = false) => {
     try {
-      const r = await fetch(`${BRIDGE_HTTP_URL}/accounts${check ? '?check=1' : ''}`, { cache: 'no-store' })
+      const r = await bfetch(`${BRIDGE_HTTP_URL}/accounts${check ? '?check=1' : ''}`, { cache: 'no-store' })
       if (r.ok) setAccounts(await r.json())
     } catch {
       /* JARVIS not running: the list stays as it was */
@@ -202,7 +203,7 @@ export function Setup() {
   }
   const signIn = async (id: string) => {
     try {
-      await fetch(`${BRIDGE_HTTP_URL}/keys/auto`, {
+      await bfetch(`${BRIDGE_HTTP_URL}/keys/auto`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ providers: [id] }),
@@ -214,7 +215,7 @@ export function Setup() {
     await loadAccounts()
     const poll = window.setInterval(async () => {
       try {
-        const s = await (await fetch(`${BRIDGE_HTTP_URL}/accounts`, { cache: 'no-store' })).json()
+        const s = await (await bfetch(`${BRIDGE_HTTP_URL}/accounts`, { cache: 'no-store' })).json()
         setAccounts(s)
         if (!s.running) window.clearInterval(poll)
       } catch {
@@ -227,9 +228,9 @@ export function Setup() {
   const disconnect = async (id: string) => {
     setLeaving(id)
     if (id === 'chatgpt') {
-      await fetch(`${BRIDGE_HTTP_URL}/accounts/chatgpt/logout`, { method: 'POST' }).catch(() => {})
+      await bfetch(`${BRIDGE_HTTP_URL}/accounts/chatgpt/logout`, { method: 'POST' }).catch(() => {})
     } else {
-      await fetch(`${BRIDGE_HTTP_URL}/keys`, {
+      await bfetch(`${BRIDGE_HTTP_URL}/keys`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ [id]: null }),
@@ -242,7 +243,7 @@ export function Setup() {
   const runCheckup = async () => {
     setChecking(true)
     try {
-      const r = await fetch(`${BRIDGE_HTTP_URL}/checkup`, { cache: 'no-store' })
+      const r = await bfetch(`${BRIDGE_HTTP_URL}/checkup`, { cache: 'no-store' })
       if (r.ok) setCheckItems((await r.json()).items)
       else setCheckItems([{ name: who, ok: false, note: `The check-up failed (${r.status}).` }])
     } catch {
@@ -289,7 +290,7 @@ export function Setup() {
     speechSynthesis.cancel()
     setSaving('Saving…')
     try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/profile`, {
+      const res = await bfetch(`${BRIDGE_HTTP_URL}/profile`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(skip ? { ...form, skip: true } : form),
@@ -304,7 +305,7 @@ export function Setup() {
       const typed = Object.fromEntries(Object.entries(keyInput).filter(([, v]) => v === null || (v ?? '').trim()))
       if (!skip && Object.keys(typed).length) {
         setSaving('Saving the AI keys and starting the translator…')
-        await fetch(`${BRIDGE_HTTP_URL}/keys`, {
+        await bfetch(`${BRIDGE_HTTP_URL}/keys`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(typed),

@@ -19,6 +19,7 @@ import {
   type CalEvent,
   useStatus,
   useBridgeUp,
+  useHealth,
   type JarvisPhase,
   type LimitMeter,
   type StockPart,
@@ -43,6 +44,9 @@ import {
   newSession,
   switchSession,
   closeSession,
+  attachFiles,
+  ATTACH_ACCEPT,
+  MAX_ATTACH,
 } from './kit'
 import { Orb, orbInfo } from './orbs'
 import './custom-layout.css'
@@ -74,6 +78,7 @@ const Icon = ({ children, size = 18, w = 1.6 }: { children: ReactNode; size?: nu
 
 const I = {
   home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
+  clip: <path d="M20.5 11.5 12.4 19.6a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />,
   apps: (
     <>
       <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
@@ -535,7 +540,7 @@ function Reactor({
   onExpand?: () => void
 }) {
   const voiced = phase === 'speaking' || phase === 'listening' || phase === 'waking'
-  const state = (phaseLabel[phase] ?? 'Online').toUpperCase()
+  const state = (phaseLabel[phase] ?? 'Ready').toUpperCase()
   const legend = `${title}  ·  NEURAL CORE  ·  ${state}  ·  VOICE LINK  ·  ${title}  ·  NEURAL CORE  ·  ${state}  ·  VOICE LINK  ·`
   const ref = useRef<HTMLDivElement>(null)
   useGlide(ref, mini)
@@ -550,7 +555,7 @@ function Reactor({
       <div className="vg-halo" />
       <Orb id={orb} phase={phase} level={level} legend={legend} className="vg-r-svg" />
       <div className="vg-r-text">
-        <span className="vg-r-kicker">{phaseLabel[phase] ?? 'Online'}</span>
+        <span className="vg-r-kicker">{phaseLabel[phase] ?? 'Ready'}</span>
         <h1>{title}</h1>
         <p>{line}</p>
         <Wave level={voiced ? level : 0} idle={voiced ? 0.22 : 0.1} />
@@ -1355,12 +1360,46 @@ function AskBar() {
   }, [])
   const inChat = useChat()
   const listening = !muted && (phase === 'listening' || phase === 'waking')
-  const send = () => {
-    if (!text.trim()) return
-    // A typed request for written content ("write…", "explain…", "code…")
-    // opens the chat view before it is sent, so the answer is written out.
-    if (ASKS_FOR_TEXT.test(text)) setChat(true)
-    void ask(text)
+
+  // Files to send with the request: 📎, dropped on the bar, or pasted (Ctrl+V,
+  // a screenshot too). Uploaded and prepared when it is sent.
+  const [files, setFiles] = useState<File[]>([])
+  const [preparing, setPreparing] = useState('')
+  const [attachNote, setAttachNote] = useState('')
+  const picker = useRef<HTMLInputElement>(null)
+  const addFiles = (list: FileList | File[] | null | undefined) => {
+    const add = Array.from(list ?? []).filter((f) => f.size > 0)
+    if (!add.length) return
+    setFiles((now) => {
+      const merged = [...now, ...add.filter((f) => !now.some((n) => n.name === f.name && n.size === f.size))]
+      if (merged.length > MAX_ATTACH) setAttachNote(`Up to ${MAX_ATTACH} files at a time.`)
+      return merged.slice(0, MAX_ATTACH)
+    })
+  }
+  const isVideo = (f: File) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|mkv|avi|wmv|3gp|webm|mpe?g|flv)$/i.test(f.name)
+
+  const send = async () => {
+    if ((!text.trim() && !files.length) || preparing) return
+    let request = text.trim()
+    if (files.length) {
+      const videos = files.filter(isVideo).length
+      setPreparing(videos ? `Preparing ${videos > 1 ? `${videos} videos` : 'the video'} (stills and what is said)…` : 'Attaching…')
+      setAttachNote('')
+      const { block, problems } = await attachFiles(files)
+      setPreparing('')
+      if (problems.length) setAttachNote(`Not attached: ${problems.join('; ')}`)
+      if (!block) return // nothing could be attached: the request stays in the box
+      // What the files are for; with none typed, a look at them.
+      request = `${request || 'Have a look at what I have attached and tell me briefly what it is.'}\n\n${block}`
+      setFiles([])
+      // Answers about files are written out: the chat view.
+      setChat(true)
+    } else if (ASKS_FOR_TEXT.test(request)) {
+      // A typed request for written content ("write…", "explain…", "code…")
+      // opens the chat view before it is sent, so the answer is written out.
+      setChat(true)
+    }
+    void ask(request)
     setText('')
     histAt.current = -1
   }
@@ -1408,8 +1447,39 @@ function AskBar() {
     el.style.overflowY = el.scrollHeight > 120 ? 'auto' : 'hidden'
   }, [text])
   return (
-    <div className={`vg-ask ${listening ? 'vg-live' : ''}`}>
+    <div
+      className={`vg-ask ${listening ? 'vg-live' : ''}`}
+      // Files dropped anywhere on the bar are attached.
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+        }
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return
+        e.preventDefault()
+        addFiles(e.dataTransfer.files)
+      }}
+    >
       {error && <div className="vg-ask-error" role="alert">{error}</div>}
+      {(files.length > 0 || preparing || attachNote) && (
+        <div className="vg-attach-row" aria-live="polite">
+          {files.map((f, i) => (
+            <span key={`${f.name}-${f.size}-${i}`} className="vg-attach-chip" title={f.name}>
+              <span aria-hidden="true">{isVideo(f) ? '🎬' : f.type.startsWith('image/') ? '🖼' : '📎'}</span>
+              <span className="vg-attach-name">{f.name}</span>
+              {!preparing && (
+                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((all) => all.filter((_, j) => j !== i))}>
+                  ✕
+                </button>
+              )}
+            </span>
+          ))}
+          {preparing && <span className="vg-attach-note">{preparing}</span>}
+          {!preparing && attachNote && <span className="vg-attach-note vg-attach-warn">{attachNote}</span>}
+        </div>
+      )}
       {/* Stop, at the far left, only while an answer is being made or spoken. */}
       {working && (
         <button type="button" className="vg-stop" title="Stop (Esc)" aria-label="Stop the answer" onClick={stopAnswer}>
@@ -1418,6 +1488,27 @@ function AskBar() {
         </button>
       )}
       <BrainPick />
+      <button
+        type="button"
+        className="vg-attach"
+        title="Attach images, videos or documents (or drop them here, or paste with Ctrl+V)"
+        aria-label="Attach files"
+        disabled={Boolean(preparing)}
+        onClick={() => picker.current?.click()}
+      >
+        <Icon size={18}>{I.clip}</Icon>
+      </button>
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        accept={ATTACH_ACCEPT}
+        hidden
+        onChange={(e) => {
+          addFiles(e.target.files)
+          e.target.value = '' // the same file can be picked again
+        }}
+      />
       <Wave level={listening ? level : 0} bars={7} idle={listening ? 0.45 : 0.3} className="vg-ask-wave" />
       {/* Enter sends; Shift+Enter starts a new line. */}
       <textarea
@@ -1426,7 +1517,24 @@ function AskBar() {
         // Screen readers don't read the grey hint as the box's name.
         aria-label="Ask"
         value={text}
-        placeholder={muted ? 'Microphone muted — type here, or tap the mic to talk' : listening ? caption || 'Listening…' : inChat ? 'Reply…  (Shift+Enter for a new line)' : 'Ask me anything…'}
+        placeholder={
+          files.length
+            ? 'What should I do with the attached file(s)? (or just send)'
+            : muted
+              ? 'Microphone muted — type here, or tap the mic to talk'
+              : listening
+                ? caption || 'Listening…'
+                : inChat
+                  ? 'Reply…  (Shift+Enter for a new line)'
+                  : 'Ask me anything…'
+        }
+        // A pasted screenshot or copied files are attached; pasted text is typed as usual.
+        onPaste={(e) => {
+          if (e.clipboardData.files.length) {
+            e.preventDefault()
+            addFiles(e.clipboardData.files)
+          }
+        }}
         onChange={(e) => {
           setText(e.target.value)
           // Typing over a recalled request makes it the new draft.
@@ -1440,12 +1548,12 @@ function AskBar() {
           }
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
-            send()
+            void send()
           }
         }}
       />
       <MicButton muted={muted} listening={listening} />
-      <button type="button" className="vg-send" title="Send" onClick={send} disabled={!text.trim()}>
+      <button type="button" className="vg-send" title="Send" onClick={() => void send()} disabled={(!text.trim() && !files.length) || Boolean(preparing)}>
         <Icon size={18}>{I.send}</Icon>
       </button>
     </div>
@@ -1515,6 +1623,9 @@ export default function CustomLayout() {
   const now = useNow(1000)
   const s = useStatus()
   const bridgeUp = useBridgeUp()
+  // Online / offline and the background listener, for the header chips.
+  const health = useHealth()
+  const said = useSaidName()
   const { phase, level, caption, activeTool, error } = useJarvis()
   const muted = useMuted()
   const [nav, setNav] = useState('home')
@@ -1656,9 +1767,13 @@ export default function CustomLayout() {
               <i />
               Link
             </span>
-            <span className={`vg-sc ${phase === 'offline' ? 'vg-wait' : 'vg-ok'}`}>
+            {/* What the assistant is doing right now. */}
+            <span
+              className={`vg-sc ${phase === 'offline' ? 'vg-wait' : 'vg-ok'} ${phase === 'listening' || phase === 'waking' ? 'vg-sc-live' : ''}`}
+              title="What it is doing now"
+            >
               <span className="vg-eq"><i /><i /><i /><i /></span>
-              Voice · {phaseLabel[phase] ?? 'Online'}
+              Voice · {phaseLabel[phase] ?? 'Ready'}
             </span>
             <button
               type="button"
@@ -1669,21 +1784,47 @@ export default function CustomLayout() {
               <i />
               Mic {muted ? 'muted' : 'live'}
             </button>
+            {/* The background "Hey <name>" listener - the one that works with
+                the window hidden (popup mode) or closed. */}
+            <span
+              className={`vg-sc ${
+                !health.up ? 'vg-bad' : health.listener === 'listening' ? 'vg-ok' : health.listener === 'muted' ? 'vg-wait' : 'vg-bad'
+              }`}
+              title={
+                !health.up
+                  ? 'Unknown - the background service is not answering'
+                  : health.listener === 'listening'
+                    ? `Listening for "Hey ${said}" in the background`
+                    : health.listener === 'muted'
+                      ? 'Not listening: the microphone is muted'
+                      : health.listener === 'off'
+                        ? 'Switched off with the desktop ON / OFF switch'
+                        : 'Not running - turn it on with the desktop ON / OFF switch'
+              }
+            >
+              <i />
+              Hey {said} · {!health.up ? '?' : health.listener === 'listening' ? 'on' : health.listener === 'stopped' ? 'not running' : health.listener}
+            </span>
           </span>
           <span className="vg-hm-line vg-flip" />
         </div>
         <div className="vg-head-right">
-          {muted ? (
-            <button type="button" className="vg-pill vg-pill-muted" title="Tap to unmute" onClick={() => void mute(false)}>
-              <i />
-              Muted
-            </button>
-          ) : (
-            <span className={`vg-pill vg-pill-${phase}`}>
-              <i />
-              {phaseLabel[phase] ?? 'Online'}
-            </span>
-          )}
+          {/* Online or offline: the connection, not what it is doing. */}
+          {(() => {
+            const c = !health.up
+              ? { cls: 'vg-pill-down', text: 'Not connected', tip: "The background service isn't answering — restart the app" }
+              : health.brain === 'cloud'
+                ? { cls: 'vg-pill-online', text: 'Online', tip: 'Online: answering with the online AI' }
+                : health.brain === 'local'
+                  ? { cls: 'vg-pill-offline', text: 'Offline mode', tip: 'No internet: answering with the offline AI on this PC' }
+                  : { cls: 'vg-pill-down', text: 'No AI', tip: 'No internet and no offline AI installed' }
+            return (
+              <span className={`vg-pill ${c.cls}`} title={c.tip}>
+                <i />
+                {c.text}
+              </span>
+            )
+          })()}
           <span className="vg-when">
             <b>{hm} {ampm}</b>
             {now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}

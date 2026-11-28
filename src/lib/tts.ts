@@ -1,3 +1,4 @@
+import { bfetch } from './bridgeAuth'
 import {
   env,
   USE_ELEVENLABS,
@@ -232,7 +233,7 @@ let naturalList: NaturalVoice[] = []
 export async function loadNaturalVoices(): Promise<NaturalVoice[]> {
   if (naturalList.length) return naturalList
   try {
-    const res = await fetch(`${BRIDGE_HTTP_URL}/voices`, { cache: 'no-store' })
+    const res = await bfetch(`${BRIDGE_HTTP_URL}/voices`, { cache: 'no-store' })
     if (res.ok) naturalList = ((await res.json()).natural ?? []) as NaturalVoice[]
   } catch {
     /* bridge down: none */
@@ -249,7 +250,7 @@ export function naturalLabel(name: string): string {
 
 /** One sentence in a natural voice, as a playable URL (null if it failed). */
 async function fetchNatural(text: string, id: string, rate: number): Promise<string | null> {
-  const res = await fetch(`${BRIDGE_HTTP_URL}/voice/say`, {
+  const res = await bfetch(`${BRIDGE_HTTP_URL}/voice/say`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text, voice: id.replace(NATURAL, ''), rate }),
@@ -1170,7 +1171,7 @@ export function createSpeaker(): Speaker {
 async function fetchCloudAudio(text: string): Promise<string | null> {
   if (BACKEND === 'bridge') {
     try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
+      const res = await bfetch(`${BRIDGE_HTTP_URL}/tts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text }),

@@ -55,6 +55,9 @@ KILL_SWITCH = HOME / "disabled"
 # Present while the microphone is muted from the onscreen popup: same effect
 # as the kill switch for listening, but JARVIS himself stays running.
 MUTED = HOME / "muted"
+# Rewritten every few seconds with what the listener is doing ("listening",
+# "muted", "off"): the window's "Hey <name>" status chip reads it via the bridge.
+HEARTBEAT = HOME / "listener-state"
 
 LOG_FILE = HOME / "wake-listener.log"
 LOG_DAYS = 7  # what was heard is kept a week, no longer
@@ -1013,6 +1016,7 @@ def main():
     last_check = 0.0
     last_reminders = 0.0
     last_prune = time.monotonic()
+    last_beat = 0.0
     jarvis_on = False
     last_data = last_sound = time.monotonic()
     stat_at, stat_peak, stat_score = time.monotonic(), 0, 0.0
@@ -1027,6 +1031,14 @@ def main():
             # started — including at login, since this runs from Startup.
             off = KILL_SWITCH.exists()
             muted = MUTED.exists()
+            # A heartbeat for the window's status chip: what it is doing now,
+            # rewritten every few seconds (stale = the listener is not running).
+            if time.monotonic() - last_beat > 3:
+                last_beat = time.monotonic()
+                try:
+                    HEARTBEAT.write_text("off" if off else "muted" if muted else "listening", encoding="utf-8")
+                except OSError:
+                    pass
             # A mute lasts only while JARVIS is open. Muted and then closed,
             # nothing on screen could unmute him, and "Hey Jarvis" stayed dead
             # until someone found ~/.jarvis/muted by hand.

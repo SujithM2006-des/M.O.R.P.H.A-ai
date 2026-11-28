@@ -76,27 +76,155 @@ const decode = (s) =>
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ')
+    // Numeric character codes too ("&#039;" -> ', "&#0183;" -> ·, "&#x2019;" -> ').
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCodePoint(Number.parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number(d)))
     .replace(/\s+/g, ' ')
     .trim()
 
-export async function webSearch(query, count = 6) {
-  const r = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-    headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36' },
-    signal: AbortSignal.timeout(20000),
+/**
+ * Web search, from several free sources, none of which needs a key.
+ *
+ * DuckDuckGo alone used to be the whole search, and it started answering this
+ * app with a bot check (status 202, an "anomaly" page) instead of results -
+ * which read as "no results", so every live question ("who is the chief
+ * minister of Tamil Nadu") came back unanswered. Now a blocked source is a
+ * failure that moves on to the next, never "nothing found":
+ *   1. DuckDuckGo (the full page, then its lite page)
+ *   2. Wikipedia's search - added to every search: reliable for "who / what
+ *      is" questions, and it keeps working when the search engines block
+ *   3. Bing - last: it answers, but gives automated requests weaker results
+ * "No results" only when every source answered and none had any.
+ */
+const SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
+// Wikipedia asks automated clients to say who they are (it rate-limits anonymous ones).
+const WIKI_UA = 'MorphaAssistant/2.0 (personal desktop assistant; https://github.com/SujithM2006-des/M.O.R.P.H.A-ai)'
+const BOT_CHECK = /anomaly-modal|captcha|unusual traffic|are you a robot|verify you are human/i
+
+async function searchPage(url, headers = {}) {
+  const r = await fetch(url, {
+    headers: { 'user-agent': SEARCH_UA, 'accept-language': 'en-IN,en;q=0.9', ...headers },
+    signal: AbortSignal.timeout(15000),
   })
-  if (!r.ok) throw new Error(`search answered ${r.status}`)
   const html = await r.text()
+  if (r.status !== 200 || BOT_CHECK.test(html)) throw new Error(r.status !== 200 ? `answered ${r.status}` : 'asked for a bot check')
+  return html
+}
+
+/** DuckDuckGo's own link wrapper ("//duckduckgo.com/l/?uddg=…") to the real address. */
+function ddgUrl(href) {
+  let url = href.replace(/&amp;/g, '&')
+  const u = url.match(/[?&]uddg=([^&]+)/)
+  if (u) url = decodeURIComponent(u[1])
+  if (url.startsWith('//')) url = `https:${url}`
+  return url
+}
+
+async function searchDuckDuckGo(query, count) {
+  const html = await searchPage(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`)
   const out = []
-  for (const m of html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:class="result__snippet"[^>]*>([\s\S]*?)<\/a>|<\/div>)/g)) {
-    let url = m[1].replace(/&amp;/g, '&')
-    const u = url.match(/[?&]uddg=([^&]+)/)
-    if (u) url = decodeURIComponent(u[1])
-    if (url.startsWith('//')) url = `https:${url}`
+  // One result at a time: the title link, then that same result's snippet
+  // (matching across results used to stop at the first </div>, losing it).
+  for (const block of html.split(/<div class="result results_links/).slice(1)) {
+    const a = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!a) continue
+    const url = ddgUrl(a[1])
     if (/duckduckgo\.com\/y\.js/.test(url)) continue // ads
-    out.push({ title: decode(m[2]), url, snippet: decode(m[3] ?? '') })
+    const s = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/)
+    out.push({ title: decode(a[2]), url, snippet: decode(s ? s[1] : '') })
     if (out.length >= count) break
   }
   return out
+}
+
+async function searchDuckDuckGoLite(query, count) {
+  const html = await searchPage(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`)
+  const out = []
+  for (const m of html.matchAll(/<a[^>]*href="([^"]+)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/g)) {
+    const url = ddgUrl(m[1])
+    if (/duckduckgo\.com\/y\.js/.test(url)) continue // ads
+    out.push({ title: decode(m[2]), url, snippet: decode(m[3]) })
+    if (out.length >= count) break
+  }
+  return out
+}
+
+async function searchWikipedia(query, count) {
+  const r = await fetch(
+    `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${count}&srsearch=${encodeURIComponent(query)}`,
+    { headers: { 'user-agent': WIKI_UA }, signal: AbortSignal.timeout(15000) },
+  )
+  if (r.status !== 200) throw new Error(`answered ${r.status}`)
+  const j = await r.json()
+  return (j.query?.search ?? []).map((s) => ({
+    title: `${s.title} - Wikipedia`,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, '_'))}`,
+    snippet: decode(s.snippet),
+  }))
+}
+
+async function searchBing(query, count) {
+  const html = await searchPage(`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en&cc=IN`)
+  const out = []
+  for (const block of html.split('<li class="b_algo"').slice(1)) {
+    const a = block.match(/<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!a) continue
+    let url = a[1].replace(/&amp;/g, '&')
+    // Bing's click-tracking link ("…/ck/a?…&u=a1<base64>") to the real address.
+    const u = url.match(/[?&]u=a1([^&]+)/)
+    if (u) {
+      try {
+        url = Buffer.from(u[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+      } catch {
+        /* keep the tracking link */
+      }
+    }
+    const p = block.match(/<p[^>]*>([\s\S]*?)<\/p>/)
+    out.push({ title: decode(a[2]), url, snippet: decode(p ? p[1] : '') })
+    if (out.length >= count) break
+  }
+  return out
+}
+
+/** Each source on its own, for checking them one by one. */
+export const SEARCH_SOURCES = { searchDuckDuckGo, searchDuckDuckGoLite, searchWikipedia, searchBing }
+
+export async function webSearch(query, count = 6) {
+  const problems = []
+  const attempt = async (name, fn) => {
+    try {
+      return await fn(query, count)
+    } catch (err) {
+      problems.push(`${name} ${err.message}`)
+      return null
+    }
+  }
+  // Wikipedia alongside the first engine, so a "who / what is" question has a
+  // reliable source even when the engine gives poor results.
+  const [ddg, wiki] = await Promise.all([attempt('DuckDuckGo', searchDuckDuckGo), attempt('Wikipedia', (q) => searchWikipedia(q, 3))])
+  let web = ddg
+  let viaBing = false
+  if (!web?.length) web = await attempt('DuckDuckGo lite', searchDuckDuckGoLite)
+  if (!web?.length) {
+    web = await attempt('Bing', searchBing)
+    viaBing = true
+  }
+  const seen = new Set()
+  const out = []
+  // DuckDuckGo's results first (they know what is current), then Wikipedia's.
+  // Bing's are weaker for automated requests (it answered a "who is the chief
+  // minister" question with dictionary pages), so then Wikipedia comes first.
+  const ordered = viaBing ? [...(wiki ?? []), ...(web ?? [])] : [...(web ?? []), ...(wiki ?? [])]
+  for (const h of ordered) {
+    const key = h.url.replace(/[#?].*$/, '').toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(h)
+  }
+  if (problems.length) console.log(`[jarvis] web search: ${problems.join('; ')}`)
+  // Every source failed (not merely found nothing): say so, rather than "no results".
+  if (!out.length && web === null && wiki === null) throw new Error(`no search source answered (${problems.join('; ')})`)
+  return out.slice(0, count + 3)
 }
 
 /** A page's readable text: scripts, styles and markup gone, headings kept as lines. */

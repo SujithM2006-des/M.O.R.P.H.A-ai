@@ -12,13 +12,21 @@ rem not here: their tools ride along with every request and cost usage.
 
 set "SPLASH=%~dp0scripts\splash.html"
 set "SPLASH=file:///%SPLASH:\=/%"
-if /i "%~1"=="wake" set "SPLASH=%SPLASH%?wake=1"
 
 rem The brain, unless it is already running — hidden: it used to sit on the
 rem taskbar as a minimised console. Everything it prints still goes to
 rem %USERPROFILE%\.jarvis\jarvis.log, and the JARVIS ON / OFF switch stops it
 rem (it finds it by the "npm start -- --writes" in its command line).
 curl -s -o nul -m 2 http://127.0.0.1:8787/health || powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -ArgumentList '/c','npm start -- --writes' -WorkingDirectory '%~dp0.' -WindowStyle Hidden"
+
+rem The window's bridge key. The bridge keeps the same key from one start to the next,
+rem so wait until it answers, then read the key and give it to the window in its address.
+rem The window takes it once and keeps it for its own tab (src/lib/bridgeAuth.ts).
+powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 60;$i++){try{Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8787/health -TimeoutSec 1 | Out-Null; exit 0}catch{Start-Sleep -Milliseconds 500}}; exit 1"
+set "JKEY="
+for /f "usebackq delims=" %%K in ("%USERPROFILE%\.jarvis\bridge-token") do set "JKEY=%%K"
+set "SPLASH=%SPLASH%?k=%JKEY%"
+if /i "%~1"=="wake" set "SPLASH=%SPLASH%&wake=1"
 
 rem Only one J.A.R.V.I.S.: if his window is already open, it is brought to the
 rem front (in popup mode, the popup is shown) and no second one opens.

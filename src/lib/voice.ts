@@ -1,3 +1,4 @@
+import { bfetch } from './bridgeAuth'
 import { BRIDGE_HTTP_URL } from '../config'
 import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
@@ -545,7 +546,7 @@ function vlog(line: string) {
   // only forwards the console while its live-reload link is up, and a missed
   // or cut-off command is exactly when the trace is needed.
   try {
-    void fetch(`${BRIDGE_HTTP_URL}/log`, {
+    void bfetch(`${BRIDGE_HTTP_URL}/log`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ line: line.slice(0, 400) }),
@@ -640,7 +641,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
     if (mode === 'deaf') return
     const t0 = performance.now()
     try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/stt`, {
+      const res = await bfetch(`${BRIDGE_HTTP_URL}/stt`, {
         method: 'POST',
         headers: { 'content-type': blob.type || 'audio/webm' },
         body: blob,

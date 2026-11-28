@@ -136,7 +136,7 @@ $xamlText = @'
         <StackPanel>
           <TextBlock x:Name="Heard" TextWrapping="Wrap" Foreground="#9CC4EE" FontFamily="Segoe UI" FontSize="12" Margin="0,0,0,6"/>
           <TextBlock x:Name="Said" TextWrapping="Wrap" Foreground="#E9F3FF" FontFamily="Segoe UI" FontSize="14"
-                     Text="Say &quot;Hey Jarvis&quot;, type below, attach or drop a file, or circle something on screen."/>
+                     Text="Say &quot;Hey {SAID}&quot;, type below, attach or drop an image, video or file, or circle something on screen."/>
         </StackPanel>
       </ScrollViewer>
       <!-- Files waiting to be sent: names, and a cross to drop them. -->
@@ -167,7 +167,9 @@ $xamlText = @'
   </Grid>
 </Window>
 '@
-$xamlText = $xamlText.Replace('J.A.R.V.I.S.', [Security.SecurityElement]::Escape($script:title)).Replace('JARVIS', [Security.SecurityElement]::Escape($script:assistant))
+# The name as said, in ordinary capitals ("Morpha"), for the hint line.
+$said = (Get-Culture).TextInfo.ToTitleCase($script:assistant.ToLower())
+$xamlText = $xamlText.Replace('J.A.R.V.I.S.', [Security.SecurityElement]::Escape($script:title)).Replace('JARVIS', [Security.SecurityElement]::Escape($script:assistant)).Replace('{SAID}', [Security.SecurityElement]::Escape($said))
 [xml]$xaml = [regex]::Replace($xamlText, '#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})\b', { param($m) Turn-Colour $m.Value })
 
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
@@ -366,9 +368,9 @@ $el.Attach.Add_Click({
   $script:modal = $true
   try {
     $dlg = New-Object Microsoft.Win32.OpenFileDialog
-    $dlg.Title = 'Give JARVIS documents or images'
+    $dlg.Title = "Give $($script:assistant) images, videos or documents"
     $dlg.Multiselect = $true
-    $dlg.Filter = 'Documents, images and voice clips|*.mp3;*.wav;*.m4a;*.ogg;*.flac;*.webm;*.pdf;*.docx;*.pptx;*.xlsx;*.txt;*.md;*.csv;*.json;*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.py;*.java;*.c;*.cpp;*.js;*.ts;*.html;*.css|All files|*.*'
+    $dlg.Filter = 'Images, videos, documents and voice clips|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.m4v;*.mkv;*.avi;*.wmv;*.3gp;*.webm;*.mpeg;*.mpg;*.mp3;*.wav;*.m4a;*.ogg;*.flac;*.pdf;*.docx;*.pptx;*.xlsx;*.doc;*.ppt;*.xls;*.txt;*.md;*.csv;*.json;*.py;*.java;*.c;*.cpp;*.js;*.ts;*.html;*.css|Videos|*.mp4;*.mov;*.m4v;*.mkv;*.avi;*.wmv;*.3gp;*.webm;*.mpeg;*.mpg|Images|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp|All files|*.*'
     if ($dlg.ShowDialog($win)) { Add-Files $dlg.FileNames }
   } finally {
     $script:modal = $false
@@ -482,8 +484,9 @@ function Send-Input {
   if (-not $text -and -not $script:files.Count) { return }
   $body = @{ text = $text }
   if ($script:files.Count) { $body.files = @($script:files.ToArray()) }
-  # Longer wait with files: the bridge copies them and extracts Office text first.
-  $timeout = if ($script:files.Count) { 90 } else { 3 }
+  # With files the bridge answers at once and prepares them in the background
+  # (a video's stills and speech take a while), so the popup never freezes.
+  $timeout = if ($script:files.Count) { 15 } else { 3 }
   if (Post '/popup/ask' $body $timeout) {
     if ($text) { $script:lastSent = $text }
     $script:histIdx = -1
@@ -526,8 +529,12 @@ $el.Mic.Add_Click({
   else { $el.Status.Text = "  ·  $($script:assistant) is not running" }
 })
 
-$labels = @{ dormant = 'standby'; waking = 'listening'; listening = 'listening'; thinking = 'thinking';
-             tooling = 'working'; speaking = 'speaking'; boot = 'starting'; offline = 'offline' }
+# What it is doing. ("offline" here only ever meant the main window had not
+# started yet - it read as "no internet", so it says that now.)
+$labels = @{ dormant = 'ready'; waking = 'listening'; listening = 'listening'; thinking = 'thinking';
+             tooling = 'working'; speaking = 'speaking'; boot = 'starting'; offline = 'not started' }
+# Online or offline: the connection, shown after what it is doing.
+$connLabels = @{ cloud = 'online'; local = 'offline mode'; none = 'no AI (offline)' }
 $last = ''
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 # 250 ms: still reads as live, at well under half the background work of 150.
@@ -567,7 +574,8 @@ $timer.Add_Tick({
     $s = Invoke-RestMethod -Uri "$bridge/popup/state" -Headers (Auth) -TimeoutSec 1
     $phase = if ($labels.ContainsKey($s.phase)) { $labels[$s.phase] } else { $s.phase }
     if ($s.tool -and $s.phase -eq 'tooling') { $phase = "working · $($s.tool)" }
-    $el.Status.Text = "  ·  $phase"
+    $conn = if ($s.brain -and $connLabels.ContainsKey([string]$s.brain)) { $connLabels[[string]$s.brain] } else { 'online' }
+    $el.Status.Text = "  ·  $phase  ·  $conn"
     $el.Dot.Opacity = if ($s.phase -in 'listening', 'waking', 'speaking') { 1 } else { 0.45 }
     # Tuck away when unused; open again the moment he is active.
     $active = $s.phase -in 'waking', 'listening', 'thinking', 'tooling', 'speaking'
@@ -598,8 +606,8 @@ $timer.Add_Tick({
     $isMuted = [bool]$s.muted
     $el.Mic.Background = if ($isMuted) { $muteOn } elseif ($live) { $micLive } else { $micIdle }
     $el.Mic.Foreground = if ($isMuted) { $muteFg } elseif ($live) { $micLiveFg } else { $micIdleFg }
-    $el.Mic.ToolTip = if ($isMuted) { 'Muted. Hold to unmute.' } else { 'Tap: talk to JARVIS (tap again for standby). Hold: mute the microphone.' }
-    if ($isMuted) { $el.Status.Text = '  ·  muted (hold the mic to unmute)' }
+    $el.Mic.ToolTip = if ($isMuted) { 'Muted. Hold to unmute.' } else { "Tap: talk to $($script:assistant) (tap again for standby). Hold: mute the microphone." }
+    if ($isMuted) { $el.Status.Text = "  ·  muted (hold the mic to unmute)  ·  $conn" }
     $key = "$($s.heard)|$($s.said)"
     if ($key -ne $last) {
       $last = $key

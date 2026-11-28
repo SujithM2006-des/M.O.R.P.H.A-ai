@@ -1,3 +1,4 @@
+import { bfetch } from './lib/bridgeAuth'
 import { useEffect, useRef } from 'react'
 import { Scene } from './scene/Scene'
 import { Hud } from './ui/Hud'
@@ -10,7 +11,7 @@ import { createSpeaker, cycleVoice, currentVoiceName, listVoices, loadNaturalVoi
 import { analyseVoice } from './lib/voiceprint'
 import CustomLayout from './custom/CustomLayout'
 import { LayoutBoundary } from './custom/LayoutBoundary'
-import { lastLayoutError, retryLayout, useHidden, useProfile } from './custom/kit'
+import { lastLayoutError, retryLayout, shownRequest, useHidden, useProfile } from './custom/kit'
 import * as sfx from './lib/sfx'
 import * as music from './lib/music'
 import * as hands from './lib/hands'
@@ -43,6 +44,7 @@ import {
   watchConnection,
   connectedLabels,
   usingBridge,
+  warmSession,
   type Msg,
 } from './lib/brain'
 import { startAnalyser, micLevel } from './lib/audio'
@@ -95,7 +97,7 @@ const CIRCLE = /\bcircle\s+(to|and|n)?\s*search\b|\bcircle\s+something\b/i
 
 /** Ask the bridge to do something on the desktop (popup, circle overlay). */
 const desktop = (path: string) =>
-  fetch(`${BRIDGE_HTTP_URL}${path}`, { method: 'POST' }).catch(() => undefined)
+  bfetch(`${BRIDGE_HTTP_URL}${path}`, { method: 'POST' }).catch(() => undefined)
 const STANDBY_LINES = [
   'Standing by, sir.',
   "Very good, sir. I'll be here.",
@@ -250,7 +252,8 @@ export default function App() {
     // A new request: the last one's error (say, "Cannot reach the bridge"
     // while it was restarting) stayed on screen under the next good answer.
     s.setError(null)
-    if (!again) s.pushTurn({ id: newId(), role: 'user', text: said }, sid)
+    // Shown as said: attached files appear as "📎 name", never as their paths.
+    if (!again) s.pushTurn({ id: newId(), role: 'user', text: shownRequest(said) }, sid)
     /**
      * The chat view: the answer is read on screen, so the model is told to
      * write it out in full (formatted), and only its opening line is spoken.
@@ -342,7 +345,7 @@ export default function App() {
       // A long job finished while the window was out of sight: say so with a
       // Windows notification (not for quick answers — those would nag).
       if (text && document.hidden && Date.now() - t0 > 20_000) {
-        void fetch(`${BRIDGE_HTTP_URL}/notify`, {
+        void bfetch(`${BRIDGE_HTTP_URL}/notify`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ title: 'Done', body: text.replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').slice(0, 180) }),
@@ -592,7 +595,7 @@ export default function App() {
       speaker.current = s
       s.say("Microphone muted, sir. Unmute me from the panel when you need me.")
       void s.end()
-      void fetch(`${BRIDGE_HTTP_URL}/popup/mute`, {
+      void bfetch(`${BRIDGE_HTTP_URL}/popup/mute`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ on: true }),
@@ -1049,7 +1052,7 @@ export default function App() {
       // offline by the wake listener — is answered now, instead of lost.
       let pending = ''
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/pending-command`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/pending-command`, { cache: 'no-store' })
         if (res.ok) pending = String((await res.json()).text ?? '').trim()
       } catch {
         /* no bridge yet: just listen */
@@ -1133,6 +1136,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // The session the window opens in (it is remembered) is warmed up at once too.
+  useEffect(() => warmSession(useStore.getState().activeSession), [])
+
   /**
    * Switching sessions: the voice stops (the answer it was reading belongs to
    * the other session, which carries on working and writing in the
@@ -1143,6 +1149,9 @@ export default function App() {
     () =>
       useStore.subscribe((s, prev) => {
         if (s.activeSession !== prev.activeSession) {
+          // Its agent starts now, so the first question there is answered as
+          // fast as the rest (~1 s, not ~4.5 s).
+          warmSession(s.activeSession)
           turn.current++
           silence()
           clearIdle()
@@ -1307,13 +1316,13 @@ export default function App() {
       // No internet: Chrome's recogniser cannot hear, so Space does what the
       // mic button does offline — the bridge hands listening to the offline
       // listener (Vosk), which chimes and sends what it heard. Online, as before.
-      void fetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store' })
+      void bfetch(`${BRIDGE_HTTP_URL}/health`, { cache: 'no-store' })
         .then((r) => r.json() as Promise<{ brain?: string }>)
         .then((h) => h.brain === 'local')
         .catch(() => false)
         .then((offline) => {
           if (offline) {
-            void fetch(`${BRIDGE_HTTP_URL}/popup/mic`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => undefined)
+            void bfetch(`${BRIDGE_HTTP_URL}/popup/mic`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => undefined)
             return
           }
           spaceTalk(store.getState().phase)

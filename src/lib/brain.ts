@@ -35,6 +35,11 @@ export async function ask(
     : direct.ask([...history, { role: 'user', content: prompt }], handlers)
 }
 
+/** The window is now in this session: start its agent before the first question. */
+export function warmSession(session: string): void {
+  if (usingBridge) bridge.warmSession(session)
+}
+
 /** A session closed in the window: its agent in the bridge is freed. */
 export function endSession(session: string): void {
   if (usingBridge) bridge.endSession(session)

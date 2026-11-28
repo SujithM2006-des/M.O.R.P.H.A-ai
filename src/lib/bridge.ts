@@ -1,6 +1,7 @@
 import type { AskHandlers } from './anthropic'
 import type { Blade, Panel } from '../store'
 import { BRIDGE_WS_URL } from '../config'
+import { bridgeSocketUrl } from './bridgeAuth'
 import { setOfflineVoice } from './tts'
 
 /**
@@ -338,8 +339,10 @@ function connect(): Promise<WebSocket> {
 
   firstReady = deferred()
 
-  connecting = new Promise<WebSocket>((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE_WS_URL)
+  // The socket URL carries the local key, fetched first. A failure here clears
+  // `connecting` so the next attempt starts fresh (scheduleReconnect retries).
+  connecting = Promise.resolve().then(bridgeSocketUrl).then((url) => new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(url)
     let settled = false
 
     /**
@@ -367,6 +370,8 @@ function connect(): Promise<WebSocket> {
       attempt = 0
       dispatch(ws)
       settle(null)
+      // The chat the window is in: its agent starts now, not on its first question.
+      if (warmed !== 'main') ws.send(JSON.stringify({ type: 'warm', session: warmed }))
       onConnection?.(everConnected ? 'reconnected' : 'open')
       everConnected = true
     }
@@ -410,6 +415,9 @@ function connect(): Promise<WebSocket> {
         scheduleReconnect()
       }
     }
+  })).catch((err: Error) => {
+    connecting = null
+    throw err
   })
 
   return connecting
@@ -447,6 +455,19 @@ const inFlight = new Map<string, { finish: (fallback?: string) => void }>()
 
 /** The session asked most recently: the one a bare cancel() (a barge-in) stops. */
 let foreground = 'main'
+
+/**
+ * Start a session's agent in the bridge before its first question: the agent
+ * and its tool servers took ~4.5 s to start, which every chat's first answer
+ * waited through (later ones answer in ~1 s). Sent whenever the window
+ * switches to a session, and again after a reconnect (a restarted bridge has
+ * no agents). An idle agent costs no tokens.
+ */
+let warmed = 'main'
+export function warmSession(session: string): void {
+  warmed = session
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'warm', session }))
+}
 
 /** Close a session's agent in the bridge (its process and memory). */
 export function endSession(session: string): void {

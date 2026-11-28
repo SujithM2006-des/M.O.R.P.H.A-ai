@@ -1,3 +1,4 @@
+import { bfetch } from '../lib/bridgeAuth'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { BRIDGE_HTTP_URL } from '../config'
 import { useStore } from '../store'
@@ -50,7 +51,7 @@ function useStatus(): Status | null {
     let alive = true
     const pull = async () => {
       try {
-        const res = await fetch(`${BRIDGE_HTTP_URL}/status`, { cache: 'no-store' })
+        const res = await bfetch(`${BRIDGE_HTTP_URL}/status`, { cache: 'no-store' })
         if (res.ok && alive) set(await res.json())
       } catch {
         /* bridge down: keep the last reading */
@@ -438,7 +439,7 @@ function Dock() {
   const open = async (id: string) => {
     setBusy(id)
     try {
-      await fetch(`${BRIDGE_HTTP_URL}/launch`, {
+      await bfetch(`${BRIDGE_HTTP_URL}/launch`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ app: id }),
