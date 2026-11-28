@@ -389,16 +389,10 @@ export default function App() {
         music.duck(false)
         store.getState().setActiveTool(null)
         music.working(false)
-        // Spoken: stay open. Having to say his name again to add one more
-        // sentence is the difference between a conversation and a vending
-        // machine. Typed: back to standby — the follow-up window only heard
-        // the room, and sent whatever was said nearby as a second request.
-        if (typed) {
-          clearIdle()
-          store.getState().setPhase('dormant')
-        } else {
-          listen(FOLLOW_UP_MS)
-        }
+        // After an answer, typed or spoken, the mic goes back to listening, so
+        // a follow-up needs no name and no click. (Typed used to drop to standby;
+        // that is changed on purpose.)
+        listen(FOLLOW_UP_MS)
       }
     }
   }

@@ -1836,6 +1836,7 @@ export default function CustomLayout() {
               <span className={`vg-pill ${c.cls}`} title={c.tip}>
                 <i />
                 {c.text}
+                {health.up && (phase === 'listening' || phase === 'waking') ? ' · Listening' : ''}
               </span>
             )
           })()}
