@@ -322,6 +322,10 @@ M.O.R.P.H.A. can act on your PC, so the bridge keeps a tool gate (`bridge/policy
   `wake-listener.log`.
 - **Port 5188 in use:** M.O.R.P.H.A. uses its own port so other Vite projects on 5173
   don't clash; free 5188 or set `PORT` (keep it within 5173–5199).
+- **"No bridge key" when opening the page directly:** the window only works when
+  started by the launcher (`start-jarvis.bat`), which passes the bridge's local
+  key. To open the page by hand, add `?k=` followed by the contents of
+  `%USERPROFILE%\.jarvis\bridge-token` to the address.
 - **No sound:** press **T**. `Google UK English Male` needs internet; set
   `VITE_SYSTEM_VOICE=David` for an offline voice.
 
