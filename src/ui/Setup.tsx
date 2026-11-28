@@ -65,7 +65,7 @@ const THEMES: { id: string; label: string; hue: number; swatch: string }[] = [
 /** From the bridge's /accounts: connected or not (null: still checking), and sign-ins in progress. */
 type Accounts = Record<'gemini' | 'groq' | 'openrouter' | 'chatgpt', { connected: boolean | null }> & {
   /** Claude through Claude Code: optional, Jarvis works on the free AIs without it. */
-  claude?: { connected: boolean; plan: string | null; expired: boolean }
+  claude?: { connected: boolean; plan: string | null; expired: boolean; off?: boolean }
   running: boolean
   jobs: Record<string, { state: string; note: string }>
 }
@@ -236,6 +236,18 @@ export function Setup() {
         body: JSON.stringify({ [id]: null }),
       }).catch(() => {})
     }
+    await loadAccounts()
+    setLeaving('')
+  }
+  // Claude card: Disconnect stops Morpha using Claude; its Claude Code sign-in is
+  // kept, so Connect brings it back. Nothing is signed out of Claude itself.
+  const toggleClaude = async (off: boolean) => {
+    setLeaving(off ? 'claude' : 'claude-on')
+    await bfetch(`${BRIDGE_HTTP_URL}/accounts/claude`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ off }),
+    }).catch(() => {})
     await loadAccounts()
     setLeaving('')
   }
@@ -545,12 +557,35 @@ export function Setup() {
                   <small>
                     {accounts?.claude?.connected
                       ? `Your Claude${accounts.claude.plan && accounts.claude.plan !== 'API key' ? ` ${accounts.claude.plan[0].toUpperCase()}${accounts.claude.plan.slice(1)}` : ''} plan, through Claude Code — used first on Auto`
-                      : accounts?.claude?.expired
-                        ? 'Signed out — sign in again in Claude Code to use it. Until then the free AIs answer.'
-                        : 'Optional. With a Claude plan, sign in once in Claude Code. Without it the free AIs answer.'}
+                      : accounts?.claude?.off
+                        ? 'Turned off here — the free AIs answer. Your Claude Code sign-in is kept, so Connect brings Claude back.'
+                        : accounts?.claude?.expired
+                          ? 'Signed out — sign in again in Claude Code to use it. Until then the free AIs answer.'
+                          : 'Optional. With a Claude plan, sign in once in Claude Code. Without it the free AIs answer.'}
                   </small>
                 </span>
-                {accounts?.claude?.connected ? <span className="su-acc-ok">✓ Connected</span> : <span className="su-acc-opt">Optional</span>}
+                {leaving === 'claude' || leaving === 'claude-on' ? (
+                  <span className="su-acc-wait">
+                    <i />
+                    {leaving === 'claude' ? 'Disconnecting…' : 'Connecting…'}
+                  </span>
+                ) : accounts?.claude?.connected ? (
+                  <span className="su-acc-done">
+                    <span className="su-acc-ok">✓ Connected</span>
+                    <button type="button" className="su-acc-off" onClick={() => void toggleClaude(true)}>
+                      Disconnect
+                    </button>
+                  </span>
+                ) : accounts?.claude?.off ? (
+                  <span className="su-acc-done">
+                    <span className="su-acc-opt">Off</span>
+                    <button type="button" className="su-google" onClick={() => void toggleClaude(false)}>
+                      Connect
+                    </button>
+                  </span>
+                ) : (
+                  <span className="su-acc-opt">Optional</span>
+                )}
               </li>
               {ACCOUNTS.map((a) => {
                 const job = accounts?.jobs?.[a.id]

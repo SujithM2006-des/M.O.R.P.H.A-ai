@@ -11,7 +11,7 @@
  * windows' connections so each reconnects onto a session with the new brain.
  */
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { installedModels } from './ollama.mjs'
@@ -142,6 +142,28 @@ export const ORDER = ['claude', 'openrouter', 'gemini', 'groq', 'local']
 
 const KEYS_FILE = join(homedir(), '.jarvis', 'keys.json')
 const CHOICE_FILE = join(homedir(), '.jarvis', 'brain-choice')
+/**
+ * Set by the Disconnect button on the Claude card: Morpha stops using Claude
+ * (the free AIs answer) without signing out of Claude Code, so a sign-in is
+ * still there to reconnect. Only this file is written; Claude's login is not.
+ */
+const CLAUDE_OFF_FILE = join(homedir(), '.jarvis', 'claude-off')
+
+export function claudeOff() {
+  try {
+    return readFileSync(CLAUDE_OFF_FILE, 'utf8') === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Turn Claude off or on for Morpha. Takes effect at once. */
+export function setClaudeOff(off) {
+  mkdirSync(join(homedir(), '.jarvis'), { recursive: true })
+  if (off) writeFileSync(CLAUDE_OFF_FILE, '1')
+  else rmSync(CLAUDE_OFF_FILE, { force: true })
+  loginCache = { at: 0, value: null }
+}
 
 /**
  * API keys, from ~/.jarvis/keys.json — this PC only, never in the repository.
@@ -261,6 +283,8 @@ export function setProxyCheck(fn) {
  */
 let loginCache = { at: 0, value: null }
 export function claudeLogin() {
+  // Turned off on the Claude card: not used, whatever the sign-in says.
+  if (claudeOff()) return { signedIn: false, plan: null, expired: false, off: true }
   if (loginCache.value && Date.now() - loginCache.at < 30_000) return loginCache.value
   let value
   if (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -291,6 +315,7 @@ export function unavailable(id) {
   // long reason was cut off there.
   if (p.needs === 'ollama') return state.model ? '' : 'not installed'
   if (!state.online) return 'offline'
+  if (id === 'claude' && claudeOff()) return 'turned off'
   if (id === 'claude' && !claudeLogin().signedIn) return claudeLogin().expired ? 'sign in again' : 'not signed in'
   if (p.needs === 'key') {
     if (!readKeys()[id]?.key) return 'not connected'

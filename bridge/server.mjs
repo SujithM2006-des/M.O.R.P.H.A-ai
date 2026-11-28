@@ -37,7 +37,7 @@ import { naturalSay, naturalVoices, warmNaturalVoices } from './voices.mjs'
 
 // Ready before the first sentence: the helper starts and the list is fetched.
 warmNaturalVoices()
-import { claudeLogin, readChoice, whyNot, LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
+import { claudeLogin, claudeOff, setClaudeOff, readChoice, whyNot, LIGHT_PROMPT, OFFLINE_PROMPT, PROVIDERS, brainMode, brainState, brainsInfo, checkBrain, currentBrain, localEnv, markExhausted, maskedKeys, proxyModel, quickAnswer, quickCommand, saveChoice, saveKeys, setProxyCheck, isLocalBrain } from './brain.mjs'
 import { PROXY_URL, proxyIsUp, proxyKey, startProxy } from './litellm.mjs'
 import { newsPrompt, newsServer, startNews } from './news.mjs'
 import { PROMPT_CREATOR, creatorServer } from './creator.mjs'
@@ -1534,6 +1534,16 @@ const handleRequest = async (req, res) => {
     return res.end(JSON.stringify({ ...keyJobs, keys: maskedKeys() }))
   }
   // Disconnect ChatGPT: sign JARVIS's window out of it (to switch accounts).
+  // Claude card: Disconnect / Connect. Only Morpha's use of Claude is switched;
+  // the Claude Code sign-in is not touched. The active AI moves at once.
+  if (req.method === 'POST' && req.url === '/accounts/claude') {
+    const body = await readJson(req)
+    setClaudeOff(Boolean(body.off))
+    const next = currentBrain()
+    if (next !== activeBrain) switchBrains(next ? `I'm on ${PROVIDERS[next].label} now.` : null)
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+    return res.end(JSON.stringify({ ok: true, off: claudeOff(), active: next }))
+  }
   if (req.method === 'POST' && req.url === '/accounts/chatgpt/logout') {
     let ok = false
     try {
@@ -1591,7 +1601,7 @@ const handleRequest = async (req, res) => {
     return res.end(
       JSON.stringify({
         // Optional: Jarvis works on the free AIs without it.
-        claude: { connected: claudeLogin().signedIn, plan: claudeLogin().plan ?? null, expired: Boolean(claudeLogin().expired) },
+        claude: { connected: claudeLogin().signedIn, plan: claudeLogin().plan ?? null, expired: Boolean(claudeLogin().expired), off: claudeOff() },
         gemini: { connected: Boolean(k.gemini) },
         groq: { connected: Boolean(k.groq) },
         openrouter: { connected: Boolean(k.openrouter) },
